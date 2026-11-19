@@ -1,6 +1,6 @@
 import { createPreview } from './engine.js?v=8';
-import { createTimeline, fmtTC } from './timeline.js?v=13';
-import { attachTools, wireMic } from './tools.js?v=13';
+import { createTimeline, fmtTC } from './timeline.js?v=14';
+import { attachTools, wireMic } from './tools.js?v=14';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -46,6 +46,7 @@ function normalize(data) {
 /* ---------- open / save ---------- */
 function serialize(request) {
   const out = JSON.parse(JSON.stringify({ ...P, sequences: P.sequences.map(s => ({ ...s, beats: orig[s.id] })) }));
+  out.sequences.forEach(s => Object.entries(s.review?.moves || {}).forEach(([k, m]) => { if (!m || m.x == null || m.y == null) { if (m && Math.abs((m.s || 1) - 1) > .001) { m.x = m.x ?? 0; m.y = m.y ?? 0; } else delete s.review.moves[k]; } }));
   out.current = S && S.id; out.savedAt = new Date().toISOString();
   if (request) out.request = request; else delete out.request;
   return JSON.stringify(out, null, 1);
@@ -198,10 +199,10 @@ async function pullNewSequences() {
   const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
   const data = normalize(JSON.parse(await f.text())); if (!data) return;
   const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
-  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media]);
+  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.mirror || null]);
   const done = s => { const j = jobs[(s.name || s.id).toLowerCase()]; return j && j.state === 'done'; };
-  const updated = data.sequences.filter(s => { const x = P.sequences.find(y => y.id === s.id); return x && done(s) && key({ ...x, beats: orig[x.id] }) !== key(s); });
-  updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; });
+  const updated = data.sequences.filter(s => { const x = P.sequences.find(y => y.id === s.id); return x && (done(s) || x.mirror || s.mirror || !editCount(x)) && key({ ...x, beats: orig[x.id] }) !== key(s); });
+  updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; delete last[s.id]; delete hist[s.id]; delete redo[s.id]; });
   if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
     await switchSeq(u.id); setTimeout(() => pv && pv.playFrom(0), 400);
     const n = u.name || u.id.toUpperCase(); status(`${n} ${u.version || ''} is ready ✓`);
