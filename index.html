@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planner</title>
+<meta name="theme-color" content="#16161a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Roboto:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="menubar">
+  <button type="button" class="brand" data-act="home" title="Home"><img src="icons/icon-192.png" alt=""><b>Planner</b></button>
+  <nav class="menu">
+    <button type="button" data-act="open" title="Open project (Ctrl+O)">Open…</button>
+    <button type="button" data-act="save" title="Save (Ctrl+S)">Save</button>
+    <button type="button" data-act="saveas" title="Save As (Ctrl+Shift+S)">Save As…</button>
+  </nav>
+  <span id="fileName" class="fileName"></span>
+  <span class="grow"></span>
+  <span id="msg" class="msg" role="status"></span>
+</header>
+
+<section id="start" class="start">
+  <div class="startBox">
+    <img src="icons/icon-512.png" alt="" class="startLogo">
+    <h1>Planner</h1>
+    <p class="sub">Open a project to review and edit its plan.</p>
+    <button type="button" class="btn primary big" data-act="open">Open project…</button>
+    <p id="fsNote" class="warn" hidden>This browser can open projects but cannot save them. Use Chrome or Edge.</p>
+    <h3>Recent</h3>
+    <ul id="recent" class="recent"></ul>
+  </div>
+</section>
+
+<main id="work" class="work" hidden>
+  <section class="top">
+    <div class="monWrap">
+      <div class="monHead"><h2 id="projTitle"></h2><span id="projBadge" class="badge"></span></div>
+      <div class="monitor"><div id="monitor"></div><div id="linkMedia" class="linkMedia" hidden></div></div>
+    </div>
+    <aside class="side">
+      <h3>Beats</h3>
+      <div id="beats" class="beats"></div>
+      <div class="send">
+        <textarea id="general" rows="2" placeholder="Anything else for this project?"></textarea>
+        <div class="sendBtns"><button type="button" id="reviseBtn" class="btn">Revise</button><button type="button" id="applyBtn" class="btn primary">Apply</button></div>
+        <p id="sendMsg" class="sendMsg"></p>
+      </div>
+    </aside>
+  </section>
+  <section id="timeline" class="tl"></section>
+</main>
+
+<input type="file" id="fileInput" accept=".planner,application/json" hidden>
+<dialog id="dlg"><p></p><div class="dlgBtns"><button type="button" class="btn no"></button><button type="button" class="btn primary yes"></button></div></dialog>
+<script type="module" src="app.js"></script>
+</body>
+</html>

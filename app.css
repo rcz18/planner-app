@@ -1,0 +1,106 @@
+:root{--bg:#121215;--panel:#1b1b20;--panel2:#232329;--line:#2e2e36;--text:#e6e6ec;--dim:#9a9aa6;--orange:#FF7A1A;--orange2:#FFB070}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Roboto,system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+button{font:inherit;color:inherit}
+.btn{background:var(--panel2);border:1px solid #3a3a43;border-radius:7px;padding:7px 14px;cursor:pointer;font-weight:500}
+.btn:hover{background:#30303a}.btn.primary{background:var(--orange);border-color:var(--orange);color:#111;font-weight:700}.btn.primary:hover{background:#ff8d3c}
+.btn.big{padding:11px 22px;font-size:15px}
+
+/* menubar */
+.menubar{display:flex;align-items:center;gap:10px;height:42px;padding:0 12px;background:#0e0e11;border-bottom:1px solid var(--line);flex:none;-webkit-app-region:drag}
+.menubar button{-webkit-app-region:no-drag}
+.brand{display:flex;align-items:center;gap:8px;background:none;border:0;cursor:pointer;padding:0 6px 0 0}
+.brand img{width:22px;height:22px;border-radius:5px}.brand b{color:var(--orange2);font-size:14px}
+.menu{display:flex;gap:2px}.menu button{background:none;border:0;padding:6px 10px;border-radius:6px;cursor:pointer;color:#d0d0d8}.menu button:hover{background:var(--panel2)}
+.fileName{font-size:13px;color:#d8d8e0;margin-left:6px}.fileName .dirty{color:#fbbf24;font-size:11px;margin-left:6px}.fileName .ok{color:#4ade80;font-size:11px;opacity:.8;margin-left:6px}
+.grow{flex:1}.msg{font-size:12px;color:var(--dim)}
+
+/* start */
+.start{flex:1;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:8vh 20px}
+.startBox{width:min(520px,100%);text-align:center}
+.startLogo{width:84px;height:84px;border-radius:18px}
+.start h1{margin:14px 0 4px;font:800 30px Roboto}.sub{color:var(--dim);margin:0 0 22px}
+.start h3{text-align:left;margin:34px 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.recent{list-style:none;margin:0;padding:0;text-align:left}
+.recent button{width:100%;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;text-align:left}
+.recent button:hover{border-color:var(--orange)}.recent small{margin-left:auto;color:var(--dim);font-size:11px}.recent .none{color:var(--dim);font-size:13px;padding:8px 2px}
+.warn{color:#fbbf24;font-size:13px}
+
+/* workspace */
+.work{flex:1;display:flex;flex-direction:column;min-height:0}
+.top{flex:1;display:flex;min-height:0;gap:0}
+.monWrap{flex:1;min-width:0;display:flex;flex-direction:column;padding:10px 12px;background:#0b0b0d}
+.monHead{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}
+.monHead h2{margin:0;font:700 15px Roboto}
+.badge{font:600 10.5px "Roboto Mono",monospace;background:var(--orange);color:#111;border-radius:4px;padding:3px 6px;text-transform:uppercase;letter-spacing:.04em;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.monitor{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
+#monitor{width:min(100%,calc((100vh - 42px - 300px - 60px) * 16 / 9));aspect-ratio:16/9;background:#000;overflow:hidden;position:relative}
+.linkMedia{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72)}
+.linkMedia>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 22px;text-align:center}.linkMedia p{color:var(--dim);font:12px "Roboto Mono",monospace}
+
+.side{width:380px;flex:none;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line);min-height:0}
+.side h3{margin:0;padding:10px 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line)}
+.beats{flex:1;overflow:auto;padding:8px}
+.beat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px}
+.beat.live{border-color:var(--orange)}
+.beat header{display:flex;align-items:center;gap:7px;font-size:12px}
+.beat .tc{font:500 11px "Roboto Mono",monospace;color:var(--orange2)}
+.beat .kind{margin-left:auto;font:600 10px "Roboto Mono",monospace;background:#33333c;border-radius:4px;padding:2px 5px;color:#ccc}
+.playBeat{background:var(--orange);border:0;color:#111;border-radius:50%;width:22px;height:22px;font-size:10px;cursor:pointer}
+.beat h4{margin:6px 0 4px;font:600 13px/1.35 Roboto;cursor:pointer}.beat h4:hover{color:var(--orange2)}
+.beat .what{margin:0 0 8px;font-size:12px;color:var(--dim);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.beat .what:hover{-webkit-line-clamp:unset}
+.picks{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.picks button{background:#2b2b33;border:1px solid #3a3a43;border-radius:6px;padding:4px 8px;font-size:11.5px;cursor:pointer}
+.picks button[aria-pressed="true"]{background:var(--orange);border-color:var(--orange);color:#111;font-weight:700}
+.beat textarea,.send textarea{width:100%;resize:vertical;background:#15151a;border:1px solid #33333c;border-radius:6px;color:var(--text);font:12.5px Roboto;padding:6px 8px}
+.send{border-top:1px solid var(--line);padding:10px}
+.sendBtns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+.sendMsg{font-size:12px;color:#86efac;margin:6px 0 0;min-height:1em}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:420px}
+dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content:flex-end;gap:8px}
+
+/* timeline */
+.tl{flex:none;height:300px;display:flex;flex-direction:column;background:#1d1d21;border-top:1px solid var(--line);user-select:none;-webkit-user-select:none}
+.tlBar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#232328;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tlBtn{background:#2f2f36;color:#e8e8ee;border:1px solid #3a3a43;border-radius:6px;padding:4px 9px;font:500 12px/1 Roboto,sans-serif;cursor:pointer}
+.tlBtn:hover{background:#3a3a43}.tlBtn:disabled{opacity:.4;cursor:default}
+.tlBtn.tlPlay{min-width:36px;font-size:13px;background:var(--orange);border-color:var(--orange);color:#111}
+.tlBtn.tlSnap.on{background:#3b3220;border-color:var(--orange);color:var(--orange2)}
+.tlTC{font:500 15px/1 "Roboto Mono",monospace;color:var(--orange2);margin-left:6px}.tlDur{font:400 12px/1 "Roboto Mono",monospace;opacity:.5}
+.tlSep{width:1px;height:18px;background:#3a3a43;margin:0 4px}
+.tlSel{font-size:12px;opacity:.85;margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}.tlSel em{color:var(--orange2);font-style:normal}
+.tlGrow{flex:1}.tlZoom{font-size:13px;opacity:.8;display:flex;align-items:center;gap:6px}.tlZoom input{width:120px;accent-color:var(--orange)}
+.tlBody{flex:1;display:flex;overflow-y:auto;min-height:0}
+.tlHeads{width:92px;flex:none;background:#202025;border-right:1px solid var(--line)}
+.thd{display:flex;flex-direction:column;justify-content:center;padding:0 10px;border-bottom:1px solid #26262c;font-size:12px;color:#cfcfd8}
+.thd b{font:600 12px/1.1 Roboto,sans-serif}.thd small{font-size:9.5px;opacity:.5;line-height:1.1}.thRuler{background:#26262b}
+.tlScroll{flex:1;overflow-x:auto;overflow-y:hidden;position:relative}
+.tlScroll::-webkit-scrollbar{height:10px}.tlScroll::-webkit-scrollbar-thumb{background:#3a3a43;border-radius:5px}
+.tlInner{position:relative;min-width:100%}
+.tlRuler{position:relative;background:#26262b;border-bottom:1px solid var(--line);cursor:ew-resize}
+.tlRuler i{position:absolute;bottom:0;width:1px;height:5px;background:#5a5a66}.tlRuler i.maj{height:10px;background:#8a8a96}
+.tlRuler span{position:absolute;top:3px;transform:translateX(3px);font:400 9.5px/1 "Roboto Mono",monospace;color:#9a9aa6;white-space:nowrap}
+.tlLane{position:relative;border-bottom:1px solid #26262c}
+.trBeats .bt{position:absolute;top:3px;bottom:3px;border-radius:4px;font-size:10px;color:#111;overflow:hidden;white-space:nowrap;padding:2px 6px;border-right:2px solid #1d1d21}
+.bt.b0{background:#FFB070}.bt.b1{background:#8fb3ff}.bt.b2{background:#b9e48a}.bt.b3{background:#e9a3e0}
+.trWords .wd{position:absolute;top:2px;bottom:2px;font-size:10px;color:#cfcfd8;background:#2a2a31;border-radius:3px;padding:1px 3px;overflow:hidden;white-space:nowrap;border-left:1px solid #50505c}
+.clip{position:absolute;top:2px;bottom:2px;border-radius:5px;overflow:hidden;white-space:nowrap;font:500 11px/1 Roboto,sans-serif;display:flex;align-items:center}
+.clip span{padding:0 9px;overflow:hidden;text-overflow:ellipsis;pointer-events:none;position:relative}
+.clip.cG{background:linear-gradient(#e0782d,#c45e17);color:#fff;border:1px solid #f39a55;cursor:grab}
+.clip.cS{background:linear-gradient(#3e9b8d,#2a7a6e);color:#fff;border:1px solid #5cc3b3;cursor:grab}
+.clip.moved{box-shadow:inset 0 0 0 2px #ffe08a}.clip.sel{outline:2px solid #fff;z-index:3}
+.clip .hl,.clip .hr{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;z-index:2}.clip .hl{left:0}.clip .hr{right:0}
+.clip .hl:hover,.clip .hr:hover,.clip.sel .hl,.clip.sel .hr{background:rgba(255,255,255,.35)}
+.clip.cV{background:#3c4d86;border:1px solid #6a80c9;color:#fff}.clip.cV canvas,.clip.cA canvas{position:absolute;left:0;top:0;height:100%;pointer-events:none}
+.clip.cV span{background:rgba(20,25,45,.7);border-radius:3px;margin-left:4px;padding:2px 6px;font-size:10px}
+.clip.cV .cut{position:absolute;top:0;bottom:0;width:2px;background:#ffe08a}
+.clip.cA{background:#1f5134;border:1px solid #3d8f5e}
+.trC .kf{position:absolute;top:6px;width:9px;height:9px;background:var(--orange2);transform:translateX(-4.5px) rotate(45deg);border:1px solid #1d1d21;z-index:2}
+.trC .camLine{position:absolute;left:0;top:0;pointer-events:none}.trC .camLine polyline{stroke:var(--orange2);stroke-opacity:.45;stroke-width:1.5}
+.tlPH{position:absolute;top:0;bottom:0;width:0;z-index:5;pointer-events:none}
+.tlPH::before{content:"";position:absolute;top:0;bottom:0;left:-1px;width:2px;background:#ff3b3b}
+.tlPH i{position:absolute;top:0;left:-7px;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid #ff3b3b}
+@media (max-width:1000px){.side{width:300px}}
