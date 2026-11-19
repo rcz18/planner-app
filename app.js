@@ -118,11 +118,11 @@ async function load(data) {
   P = data; Object.keys(orig).forEach(k => delete orig[k]);
   P.sequences.forEach(s => { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); });
   savedSig = sig();
-  $('#start').hidden = true; $('#work').hidden = false;
+  $('#start').hidden = true; $('#work').hidden = false; $('#renderBtn').hidden = false;
   paintTitle();
   await switchSeq((P.current && P.sequences.find(s => s.id === P.current)) ? P.current : P.sequences[0].id);
   try { lastFileStamp = fh ? (await fh.getFile()).lastModified : 0; } catch (e) {}
-  Object.keys(jobs).forEach(k => delete jobs[k]); pollSoon(500);
+  Object.keys(jobs).forEach(k => delete jobs[k]); firstPoll = true; pollSoon(500);
 }
 async function switchSeq(id) {
   const seq = P.sequences.find(s => s.id === id); if (!seq) return;
@@ -153,7 +153,10 @@ function markBeat() { const t = pv.time(); document.querySelectorAll('.beat').fo
 function paintTabs() {
   const bar = $('#seqTabs'); if (!P) { bar.hidden = true; return; } bar.hidden = false;
   const html = P.sequences.map(s => { const r = s.review, n = Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.general.trim() ? 1 : 0);
-    return `<button type="button" class="seqTab${s === S ? ' cur' : ''}" data-seq="${esc(s.id)}" title="${esc(s.label || '')}"><b>${esc(s.name || s.id.toUpperCase())}</b><span>${esc(s.label || '')}</span>${n ? '<i class="edits" title="Has your edits"></i>' : ''}</button>`; }).join('');
+    const j = jobs[(s.name || s.id).toLowerCase()], show = j && (j.state !== 'done' || j._fresh);
+    const pct = j ? Math.max(0, Math.min(100, +j.pct || 0)) : 0, st = j ? (j.state === 'error' ? 'err' : j.state === 'done' ? 'done' : '') : '';
+    const prog = show ? `<div class="pbar"><i style="width:${pct}%"></i></div><em>${pct}%</em>` : '';
+    return `<button type="button" class="seqTab${s === S ? ' cur' : ''}${show ? ' work ' + st : ''}" data-seq="${esc(s.id)}" title="${esc(show ? (j.step || '') : (s.label || ''))}"><b>${esc(s.name || s.id.toUpperCase())}</b><span>${esc(show ? (j.step || 'Waiting for Claude…') : (s.label || ''))}</span>${n && !show ? '<i class="edits" title="Has your edits"></i>' : ''}${prog}</button>`; }).join('');
   const pend = Object.values(jobs).filter(j => !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase())).map(j => {
     const pct = Math.max(0, Math.min(100, +j.pct || 0)), st = j.state === 'error' ? 'err' : j.state === 'done' ? 'done' : '';
     return `<div class="seqTab pend ${st}" title="${esc(j.step || '')}"><b>${esc(j.seq)}</b><span>${esc(j.step || 'Waiting for Claude…')}</span><div class="pbar"><i style="width:${pct}%"></i></div><em>${pct}%</em></div>`; }).join('');
@@ -164,7 +167,7 @@ $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialo
 
 /* ---------- progress from Claude: Claude writes "Planner App/planner-status.json" while it works ---------- */
 const jobs = {};             // seq name (lower case) → { seq, pct, step, state }
-let pollT = null, lastFileStamp = 0;
+let pollT = null, lastFileStamp = 0, firstPoll = true;
 function pollSoon(ms = 1500) { clearTimeout(pollT); pollT = setTimeout(poll, ms); }
 async function poll() {
   if (!P) return;
@@ -172,19 +175,33 @@ async function poll() {
     const dir = await kvGet('folder:' + P.id);
     if (dir && (await dir.queryPermission({ mode: 'read' })) === 'granted') {
       const f = await fileFromFolder(dir, 'Planner App/planner-status.json');
-      if (f) { const st = JSON.parse(await f.text()); (st.jobs || []).filter(j => !j.project || j.project === P.id).forEach(j => { jobs[String(j.seq).toLowerCase()] = { ...jobs[String(j.seq).toLowerCase()], ...j }; }); }
+      if (f) { const st = JSON.parse(await f.text()); (st.jobs || []).filter(j => !j.project || j.project === P.id).forEach(j => { const k = String(j.seq).toLowerCase(), was = jobs[k];
+        /* a job we asked for (waiting) must not be closed by an old "done" line from an earlier request */
+        if (was && was.state === 'waiting' && j.state === 'done' && (!j.at || j.at < was.since)) return;
+        if (j.state === 'done' && !firstPoll && (!was || was.state !== 'done')) { j._fresh = true; j._doneAt = Date.now(); }
+        jobs[k] = { ...was, ...j }; }); }
     }
+    firstPoll = false;
+    Object.values(jobs).forEach(j => { if (j._fresh && Date.now() - j._doneAt > 12000) j._fresh = false; });
     if (fh && Object.values(jobs).some(j => j.state === 'done')) await pullNewSequences();
   } catch (e) {}
   paintTabs();
-  const busy = Object.values(jobs).some(j => j.state !== 'done' && j.state !== 'error' && !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase()));
-  pollSoon(busy ? 3000 : 15000);
+  const busy = Object.values(jobs).some(j => (j.state !== 'done' && j.state !== 'error') || j._fresh);
+  pollSoon(busy ? 2000 : 15000);
 }
 /* add sequences Claude put in the file, without touching your unsaved edits */
 async function pullNewSequences() {
   const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
   const data = normalize(JSON.parse(await f.text())); if (!data) return;
   const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
+  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media]);
+  const done = s => { const j = jobs[(s.name || s.id).toLowerCase()]; return j && j.state === 'done'; };
+  const updated = data.sequences.filter(s => { const x = P.sequences.find(y => y.id === s.id); return x && done(s) && key({ ...x, beats: orig[x.id] }) !== key(s); });
+  updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; });
+  if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
+    await switchSeq(u.id); setTimeout(() => pv && pv.playFrom(0), 400);
+    const n = u.name || u.id.toUpperCase(); status(`${n} ${u.version || ''} is ready ✓`);
+    $('#sendMsg').innerHTML = `<b>${esc(n)} ${esc(u.version || '')}</b> is ready ✓ playing it now.`; }
   if (!added.length) return;
   added.forEach(s => { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences.push(s); });
   savedSig = sig();   // the new tabs come from the file, so they are not unsaved changes
@@ -257,10 +274,26 @@ async function send(kind) {
   if (!ok) return;
   const line = `/planner ${kind === 'apply' ? 'apply' : 'revise'} ${seqName()}`;
   let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'}`;
+  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'} The ${esc(seqName())} tab shows Claude’s progress and plays the result when it’s ready.`;
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting', since: new Date().toISOString() };
+  paintTabs(); pollSoon();
 }
 $('#reviseBtn').onclick = () => send('revise');
 $('#applyBtn').onclick = () => send('apply');
+/* one button: render this exact version and apply it to its Premiere sequence (no plan changes) */
+$('#renderBtn').onclick = async () => {
+  if (!P || !S) return;
+  const R = S.review, edits = Object.values(R.picks).filter(Boolean).length + Object.values(R.notes).filter(x => x && x.trim()).length + Object.keys(S.timeline).length + Object.keys(R.moves || {}).length + (R.cams || []).length + (R.drawings || []).length + ((R.general || '').trim() ? 1 : 0);
+  if (edits && !(await ask(`${seqName()} has notes or edits that Claude hasn't done yet. Export ${S.version || 'this version'} as it is now (your notes are ignored)?`, 'Export as is', 'Cancel'))) return;
+  const ok = await save({ kind: 'apply', sequence: S.id, at: new Date().toISOString(), summary: `Export ${seqName()} ${S.version || ''}: render exactly as it is in the planner and apply it to its Premiere sequence. No plan changes.` });
+  if (!ok) return;
+  const line = `/planner export ${seqName()}`;
+  let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
+  $('#sendMsg').innerHTML = `Export for <b>${esc(seqName())} ${esc(S.version || '')}</b> saved ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'} Keep Premiere open with the Claude Apply panel.`;
+  status(copied ? 'Copied: ' + line : 'Saved');
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting', since: new Date().toISOString() };
+  paintTabs(); pollSoon();
+};
 
 /* ---------- small dialog ---------- */
 function ask(text, yes, no) { return new Promise(r => { const d = $('#dlg'); d.querySelector('p').textContent = text; d.querySelector('.yes').textContent = yes; d.querySelector('.no').textContent = no;
