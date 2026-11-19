@@ -35,7 +35,8 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   }
   btns.forEach(b => b.onclick = () => setMode(b.dataset.m));
   const changed = () => { onChange && onChange(); };
-  const cqw = px => px * 100 / fr.clientWidth;
+  const fw = () => fr.clientWidth || fr.getBoundingClientRect().width || host.getBoundingClientRect().width || 1000;
+  const cqw = px => { const v = px * 100 / fw(); return Number.isFinite(v) ? v : 0; };
 
   /* ---------- Move / Resize (Claude's graphics and your own photos/videos) ---------- */
   let sel = null, mdrag = null, rdrag = null;
@@ -68,7 +69,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     box.querySelector('b').textContent = Math.round(scaleOf(sel) * 100) + '%';
   }
   function setScale(s) { if (!sel) return; s = Math.max(0.2, Math.min(5, s));
-    if (isM(sel)) { const m = mEntry(sel), el = elOf(sel); if (!m) return; const w0 = m.w0 || m.w, nw = +(w0 * s).toFixed(2); const hq = el ? el.getBoundingClientRect().height * 100 / fr.clientWidth : 0; const k = nw / m.w;
+    if (isM(sel)) { const m = mEntry(sel), el = elOf(sel); if (!m) return; const w0 = m.w0 || m.w, nw = +(w0 * s).toFixed(2); const hq = el ? el.getBoundingClientRect().height * 100 / fw() : 0; const k = nw / m.w;
       m.x = +(m.x + m.w / 2 - nw / 2).toFixed(2); m.y = +(m.y + hq / 2 - hq * k / 2).toFixed(2); m.w = nw; renderMedia(); }
     else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +s.toFixed(3); R.moves[sel] = m; pv.applyMoves(); }
     placeBox(); paintHint(); }
