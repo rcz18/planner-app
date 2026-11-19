@@ -151,3 +151,9 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .exportBtn:hover{background:#22c55e;border-color:#22c55e}
 .exportBtn:disabled{opacity:.4}
 .exportBtn[hidden]{display:none}
+
+.toolHint .szc{display:inline-flex;align-items:center;gap:6px;margin:0 6px;vertical-align:middle}
+.toolHint .szc button{width:26px;height:24px;border-radius:6px;border:1px solid #3a3b40;background:#1c1d21;color:#fff;font:700 15px/1 Roboto,sans-serif;cursor:pointer;padding:0}
+.toolHint .szc button:hover{border-color:#FF7A1A}
+.toolHint .szc input[type=range]{width:140px;accent-color:#FF7A1A}
+.toolHint .szc b{min-width:40px;color:#FFB070}
