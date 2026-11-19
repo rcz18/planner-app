@@ -36,7 +36,7 @@ button{font:inherit;color:inherit}
 .monHead h2{margin:0;font:700 15px Roboto}
 .badge{font:600 10.5px "Roboto Mono",monospace;background:var(--orange);color:#111;border-radius:4px;padding:3px 6px;text-transform:uppercase;letter-spacing:.04em;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .monitor{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
-#monitor{width:min(100%,calc((100vh - 42px - 300px - 110px) * 16 / 9));aspect-ratio:16/9;background:#000;overflow:hidden;position:relative}
+#monitor{width:min(100%,calc((100vh - 42px - var(--tlh,300px) - 116px) * 16 / 9));aspect-ratio:16/9;background:#000;overflow:hidden;position:relative}
 .linkMedia{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72)}
 .linkMedia>div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 22px;text-align:center}.linkMedia p{color:var(--dim);font:12px "Roboto Mono",monospace}
 
@@ -63,7 +63,7 @@ dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
 dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content:flex-end;gap:8px}
 
 /* timeline */
-.tl{flex:none;height:300px;display:flex;flex-direction:column;background:#1d1d21;border-top:1px solid var(--line);user-select:none;-webkit-user-select:none}
+.tl{flex:none;height:var(--tlh,300px);display:flex;flex-direction:column;background:#1d1d21;border-top:1px solid var(--line);user-select:none;-webkit-user-select:none}
 .tlBar{display:flex;align-items:center;gap:6px;padding:6px 10px;background:#232328;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .tlBtn{background:#2f2f36;color:#e8e8ee;border:1px solid #3a3a43;border-radius:6px;padding:4px 9px;font:500 12px/1 Roboto,sans-serif;cursor:pointer}
 .tlBtn:hover{background:#3a3a43}.tlBtn:disabled{opacity:.4;cursor:default}
@@ -157,3 +157,19 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .toolHint .szc button:hover{border-color:#FF7A1A}
 .toolHint .szc input[type=range]{width:140px;accent-color:#FF7A1A}
 .toolHint .szc b{min-width:40px;color:#FFB070}
+
+/* v13 */
+.tlSplit{flex:none;height:6px;cursor:row-resize;background:#18181c;border-top:1px solid var(--line);position:relative}
+.tlSplit::after{content:"";position:absolute;left:50%;top:1px;width:40px;height:3px;margin-left:-20px;border-radius:2px;background:#3a3a44}
+.tlSplit:hover,.tlSplit.on{background:#2a1a0e}.tlSplit:hover::after,.tlSplit.on::after{background:var(--orange)}
+.applyAllBtn{background:#FF7A1A!important;border-color:#FF7A1A!important;color:#1a0f05!important;font-weight:700}
+.applyAllBtn:hover{background:#ff9140!important}
+.approveBtn{border-color:#2f6b45}.approveBtn:hover{background:#173a26}
+.approveBtn.on{background:#22c55e;border-color:#22c55e;color:#06210f;font-weight:700}
+.btn:disabled{opacity:.4;pointer-events:none}
+.seqTab.appr{box-shadow:inset 0 -2px 0 #22c55e}.seqTab .ok{color:#4ade80;font-style:normal;margin-left:4px;font-weight:700}
+.trM .clip.cM{background:linear-gradient(#1f5e3a,#174a2d);border:1px solid #34d17a;color:#d9ffe9}
+.trM .clip.cM.sel{outline:2px solid #fff;outline-offset:-1px}
+.side textarea.big{resize:none;overflow-y:auto;border-color:var(--orange);box-shadow:0 0 0 2px rgba(255,122,26,.18);transition:height .12s}
+.toolHint .mnote{background:#15151a;border:1px solid #33333c;border-radius:5px;color:var(--text);font:12px Roboto;padding:3px 6px;width:220px}
+.side.ro .beat .picks,.side.ro .beat .noteRow,.side.ro .send{opacity:.35;pointer-events:none}
