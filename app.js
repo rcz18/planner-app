@@ -249,4 +249,4 @@ if ('launchQueue' in window) launchQueue.setConsumer(async p => { if (p.files &&
 if (!canFS) $('#fsNote').hidden = false;
 paintRecent();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-window.__planner = { load: d => { fh = null; return load(normalize(d)); }, mountFile: f => mount(f), switchSeq: id => switchSeq(id) };
+window.__planner = { load: d => { fh = null; return load(normalize(d)); }, mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t) };
