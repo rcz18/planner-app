@@ -73,22 +73,23 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
       m.x = +(m.x + m.w / 2 - nw / 2).toFixed(2); m.y = +(m.y + hq / 2 - hq * k / 2).toFixed(2); m.w = nw; renderMedia(); }
     else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +s.toFixed(3); R.moves[sel] = m; pv.applyMoves(); }
     placeBox(); paintHint(); }
-  function nudge(dx, dy) { if (!sel) return; if (isM(sel)) { const m = mEntry(sel); m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); renderMedia(); } else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); R.moves[sel] = m; pv.applyMoves(); } placeBox(); paintHint(); }
+  function nudge(dx, dy) { if (!sel || bar.hidden) return; if (isM(sel)) { const m = mEntry(sel); m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); renderMedia(); } else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); R.moves[sel] = m; pv.applyMoves(); } placeBox(); paintHint(); }
   const label = k => { if (isM(k)) { const m = mEntry(k); return 'your ' + (m && m.type === 'video' ? 'video' : 'photo') + (m && m.name ? ' ' + m.name : ''); } const d = pv.byK[k]; const c = d.cloneNode(true); c.querySelectorAll('[aria-hidden="true"],svg').forEach(x => x.remove()); return (c.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30) || 'graphic'; };
   function pick(k) { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sel = k; if (k && !isM(k) && pv.byK[k]) pv.byK[k].classList.add('pa-sel'); if (isM(k)) tl.selectMedia && tl.selectMedia(k.slice(2)); paintHint(); placeBox(); }
   root.addEventListener('pointerdown', ev => {
+    if (bar.hidden) return;   // FULL tab is view only
     if (mode === 'move') { const path = ev.composedPath(); const hnd = path.find(n => n.dataset && n.dataset.c && n.parentNode === box);
       if (hnd && sel) { ev.preventDefault(); const r = elOf(sel).getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         rdrag = { cx, cy, d0: Math.max(4, Math.hypot(ev.clientX - cx, ev.clientY - cy)), s0: scaleOf(sel) }; hnd.setPointerCapture(ev.pointerId); return; }
       const md = path.find(n => n.classList && n.classList.contains('pa-media'));
       if (md) { ev.preventDefault(); pick('m:' + md.dataset.m); const m = mEntry(sel); mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { x: m.x, y: m.y } }; md.setPointerCapture(ev.pointerId); return; }
       const d = path.find(n => n.classList && n.classList.contains('ov')); if (!d) { pick(null); return; }
-      ev.preventDefault(); pick(d.dataset.k); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { ...m } }; d.setPointerCapture(ev.pointerId); }
+      ev.preventDefault(); pick(d.dataset.k); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { x: Number.isFinite(+m.x) ? +m.x : 0, y: Number.isFinite(+m.y) ? +m.y : 0, s: Number.isFinite(+m.s) && m.s > 0 ? +m.s : 1 } }; d.setPointerCapture(ev.pointerId); }
     else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); cdrag = { x0: ev.clientX, y0: ev.clientY, k0: { ...k }, k }; fr.setPointerCapture(ev.pointerId); }
   });
   root.addEventListener('pointermove', ev => {
     if (mode === 'move' && rdrag && sel) { setScale(rdrag.s0 * Math.hypot(ev.clientX - rdrag.cx, ev.clientY - rdrag.cy) / rdrag.d0); return; }
-    if (mode === 'move' && mdrag && sel) { const x = +(mdrag.m0.x + cqw(ev.clientX - mdrag.x0)).toFixed(2), y = +(mdrag.m0.y + cqw(ev.clientY - mdrag.y0)).toFixed(2);
+    if (mode === 'move' && mdrag && sel) { const x = +(mdrag.m0.x + cqw(ev.clientX - mdrag.x0)).toFixed(2), y = +(mdrag.m0.y + cqw(ev.clientY - mdrag.y0)).toFixed(2); if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       if (isM(sel)) { const m = mEntry(sel); m.x = x; m.y = y; renderMedia(); } else { R.moves[sel] = { x, y, s: mdrag.m0.s }; pv.applyMoves(); } placeBox(); paintHint(); }
     else if (mode === 'cam' && cdrag) { cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(pv.time()); paintHint(); }
   });
