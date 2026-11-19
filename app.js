@@ -84,8 +84,12 @@ async function addRecent(h) { const list = (await kvGet('recent')) || []; const 
 /* ---------- media: link the project folder once, every sequence finds its video inside it ---------- */
 async function fileFromFolder(dir, rel) {
   const parts = String(rel || '').split(/[\\/]+/).filter(Boolean); if (!parts.length) return null;
-  let d = dir; for (let i = 0; i < parts.length - 1; i++) d = await d.getDirectoryHandle(parts[i]);
-  return await (await d.getFileHandle(parts[parts.length - 1])).getFile();
+  /* works whether you picked the project folder or the media folder itself */
+  for (let start = 0; start < parts.length; start++) {
+    try { let d = dir; for (let i = start; i < parts.length - 1; i++) d = await d.getDirectoryHandle(parts[i]);
+      return await (await d.getFileHandle(parts[parts.length - 1])).getFile(); } catch (e) {}
+  }
+  return null;
 }
 async function findMedia(seq, interactive) {
   const rel = seq.media && seq.media.video; const fkey = 'folder:' + P.id, vkey = 'media:' + P.id + ':' + seq.id;
@@ -99,7 +103,7 @@ async function findMedia(seq, interactive) {
 function showLink(seq, need) {
   const box = $('#linkMedia'); box.hidden = false;
   box.innerHTML = `<div><b>${need === 'allow' ? 'Allow the project folder again' : 'Link the project folder'}</b>
-    <p>Choose the folder that holds <b>${esc(seq.media?.video || 'the video')}</b>${P.sequences.length > 1 ? ' (one time for all ' + P.sequences.length + ' sequences)' : ''}.</p>
+    <p>Choose the <b>Planner App</b> folder (or its <b>media</b> folder). It holds <b>${esc(seq.media?.video || 'the video')}</b>${P.sequences.length > 1 ? ' (one time for all ' + P.sequences.length + ' sequences)' : ''}.</p>
     <button type="button" class="btn primary" id="linkFolder">${need === 'allow' ? 'Allow' : 'Choose folder…'}</button> <button type="button" class="btn" id="linkFile">Choose just this video…</button></div>`;
   $('#linkFolder').onclick = async () => {
     try { if (need !== 'allow') { const d = await window.showDirectoryPicker({ id: 'planner-folder', mode: 'read' }); await kvSet('folder:' + P.id, d); }
