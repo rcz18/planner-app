@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js';
-import { createTimeline, fmtTC } from './timeline.js';
-import { attachTools, wireMic } from './tools.js';
+import { createPreview } from './engine.js?v=7';
+import { createTimeline, fmtTC } from './timeline.js?v=7';
+import { attachTools, wireMic } from './tools.js?v=7';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
