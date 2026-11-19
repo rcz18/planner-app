@@ -8,7 +8,13 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
   const root = host.shadowRoot, fr = pv.frame, v = pv.video;
   const st = document.createElement('style');
   st.textContent = `.frame.pa-move .ov.on{pointer-events:auto;cursor:move}.frame.pa-move .ov.on:hover{outline:1px dashed rgba(255,255,255,.6);outline-offset:3px}
-  .frame.pa-cam{cursor:grab}.frame.pa-cam:active{cursor:grabbing}`;
+  .frame.pa-cam{cursor:grab}.frame.pa-cam:active{cursor:grabbing}
+  .pa-box{position:absolute;z-index:50;pointer-events:none;border:1.5px solid rgba(255,224,138,.95);box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+  .pa-box[hidden]{display:none}
+  .pa-box i{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;background:#FF7A1A;border:2px solid #fff;border-radius:3px;pointer-events:auto;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+  .pa-box i[data-c="nw"]{left:0;top:0;cursor:nwse-resize}.pa-box i[data-c="ne"]{left:100%;top:0;cursor:nesw-resize}
+  .pa-box i[data-c="sw"]{left:0;top:100%;cursor:nesw-resize}.pa-box i[data-c="se"]{left:100%;top:100%;cursor:nwse-resize}
+  .pa-box b{position:absolute;left:50%;top:-26px;transform:translateX(-50%);background:#FF7A1A;color:#fff;font:700 11px/1 Roboto,sans-serif;padding:4px 7px;border-radius:5px;white-space:nowrap}`;
   root.appendChild(st);
   let mode = '';
   bar.innerHTML = `<button type="button" class="tool" data-m="move" title="Move / resize text and animations (M)">⤧ Move</button><button type="button" class="tool" data-m="cam" title="Zoom / pan the camera here (Z)">⌖ Zoom/Pan</button><button type="button" class="tool" data-m="draw" title="Draw on this frame and comment (D)">✎ Draw</button>`;
@@ -20,28 +26,42 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
     fr.classList.toggle('pa-move', mode === 'move'); fr.classList.toggle('pa-cam', mode === 'cam');
     if (mode) v.pause();
     if (mode === 'draw') openDraw();
-    paintHint();
+    paintHint(); placeBox();
   }
   btns.forEach(b => b.onclick = () => setMode(b.dataset.m));
   const changed = () => { onChange && onChange(); };
   const cqw = px => px * 100 / fr.clientWidth;
 
   /* ---------- Move / Resize ---------- */
-  let sel = null, mdrag = null;
+  let sel = null, mdrag = null, rdrag = null;
+  const box = document.createElement('div'); box.className = 'pa-box'; box.hidden = true;
+  box.innerHTML = '<i data-c="nw"></i><i data-c="ne"></i><i data-c="sw"></i><i data-c="se"></i><b></b>'; fr.appendChild(box);
+  function placeBox() {
+    if (mode !== 'move' || !sel || !pv.byK[sel] || !pv.byK[sel].classList.contains('on')) { box.hidden = true; return; }
+    const r = pv.byK[sel].getBoundingClientRect(), f = fr.getBoundingClientRect();
+    if (!r.width || !r.height) { box.hidden = true; return; }
+    box.hidden = false; box.style.left = (r.left - f.left) + 'px'; box.style.top = (r.top - f.top) + 'px'; box.style.width = r.width + 'px'; box.style.height = r.height + 'px';
+    const m = R.moves[sel]; box.querySelector('b').textContent = Math.round((m ? m.s : 1) * 100) + '%';
+  }
+  function setScale(s) { if (!sel) return; const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +Math.max(0.2, Math.min(5, s)).toFixed(3); R.moves[sel] = m; pv.applyMoves(); placeBox(); paintHint(); }
   const label = k => { const d = pv.byK[k]; const c = d.cloneNode(true); c.querySelectorAll('[aria-hidden="true"],svg').forEach(x => x.remove()); return (c.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30) || 'graphic'; };
-  function pick(k) { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sel = k; if (k) pv.byK[k].classList.add('pa-sel'); paintHint(); }
+  function pick(k) { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sel = k; if (k) pv.byK[k].classList.add('pa-sel'); paintHint(); placeBox(); }
   root.addEventListener('pointerdown', ev => {
-    if (mode === 'move') { const d = ev.composedPath().find(n => n.classList && n.classList.contains('ov')); if (!d) { pick(null); return; }
+    if (mode === 'move') { const path = ev.composedPath(); const hnd = path.find(n => n.dataset && n.dataset.c && n.parentNode === box);
+      if (hnd && sel) { ev.preventDefault(); const r = pv.byK[sel].getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        rdrag = { cx, cy, d0: Math.max(4, Math.hypot(ev.clientX - cx, ev.clientY - cy)), s0: (R.moves[sel] || { s: 1 }).s }; hnd.setPointerCapture(ev.pointerId); return; }
+      const d = path.find(n => n.classList && n.classList.contains('ov')); if (!d) { pick(null); return; }
       ev.preventDefault(); pick(d.dataset.k); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { ...m } }; d.setPointerCapture(ev.pointerId); }
     else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); cdrag = { x0: ev.clientX, y0: ev.clientY, k0: { ...k }, k }; fr.setPointerCapture(ev.pointerId); }
   });
   root.addEventListener('pointermove', ev => {
-    if (mode === 'move' && mdrag && sel) { R.moves[sel] = { x: +(mdrag.m0.x + cqw(ev.clientX - mdrag.x0)).toFixed(2), y: +(mdrag.m0.y + cqw(ev.clientY - mdrag.y0)).toFixed(2), s: mdrag.m0.s }; pv.applyMoves(); paintHint(); }
+    if (mode === 'move' && rdrag && sel) { setScale(rdrag.s0 * Math.hypot(ev.clientX - rdrag.cx, ev.clientY - rdrag.cy) / rdrag.d0); return; }
+    if (mode === 'move' && mdrag && sel) { R.moves[sel] = { x: +(mdrag.m0.x + cqw(ev.clientX - mdrag.x0)).toFixed(2), y: +(mdrag.m0.y + cqw(ev.clientY - mdrag.y0)).toFixed(2), s: mdrag.m0.s }; pv.applyMoves(); placeBox(); paintHint(); }
     else if (mode === 'cam' && cdrag) { cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(pv.time()); paintHint(); }
   });
-  root.addEventListener('pointerup', () => { if (mdrag) { mdrag = null; changed(); } if (cdrag) { cdrag = null; changed(); tl.redraw(); } });
+  root.addEventListener('pointerup', () => { if (rdrag) { rdrag = null; changed(); } if (mdrag) { mdrag = null; changed(); } if (cdrag) { cdrag = null; changed(); tl.redraw(); } });
   root.addEventListener('wheel', ev => {
-    if (mode === 'move' && sel) { ev.preventDefault(); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +Math.max(0.2, Math.min(5, m.s * (ev.deltaY < 0 ? 1.05 : 1 / 1.05))).toFixed(3); R.moves[sel] = m; pv.applyMoves(); paintHint(); changed(); }
+    if (mode === 'move' && sel) { ev.preventDefault(); const m = R.moves[sel] || { s: 1 }; setScale(m.s * (ev.deltaY < 0 ? 1.05 : 1 / 1.05)); changed(); }
     else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); k.s = +Math.max(1, Math.min(4, k.s * (ev.deltaY < 0 ? 1.04 : 1 / 1.04))).toFixed(3); pv.render(pv.time()); paintHint(); changed(); tl.redraw(); }
   }, { passive: false });
 
@@ -56,18 +76,26 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
   /* ---------- hint line ---------- */
   function paintHint() {
     if (mode === 'move') { const m = sel && R.moves[sel];
-      hint.innerHTML = sel ? `Moving <b>${esc(label(sel))}</b>: drag it · scroll to resize · arrows nudge${m ? ` · x ${m.x >= 0 ? '+' : ''}${m.x} y ${m.y >= 0 ? '+' : ''}${m.y} size ${Math.round(m.s * 100)}% <button type="button" data-h="mreset">Reset</button>` : ''}` : 'Click a text or animation on the paused frame to move it.'; }
+      const pct = Math.round((m ? m.s : 1) * 100);
+      hint.innerHTML = sel ? `Moving <b>${esc(label(sel))}</b>: drag to move · drag an orange corner to resize · arrows nudge · + / − size
+        <span class="szc"><button type="button" data-h="mdown" title="Smaller (−)">−</button><input type="range" data-h="mrange" min="20" max="500" step="1" value="${pct}"><button type="button" data-h="mup" title="Bigger (+)">+</button><b>${pct}%</b></span>${m ? ` · x ${m.x >= 0 ? '+' : ''}${m.x} y ${m.y >= 0 ? '+' : ''}${m.y} <button type="button" data-h="mreset">Reset</button>` : ''}` : 'Click a text or animation on the paused frame to move or resize it.'; }
     else if (mode === 'cam') { const t = tNow(), k = R.cams.find(x => Math.abs(x.t - t) < 0.5 / FPS), b = beatAt(t), n = R.cams.filter(x => x.t >= b.t0 && x.t < b.t1).length;
       hint.innerHTML = `Camera at ${t.toFixed(2)} s: scroll to zoom · drag to pan${k ? ` · zoom ${Math.round(k.s * 100)}% <button type="button" data-h="cdel">Remove this key</button>` : ''}${n ? ` · ${n} key${n > 1 ? 's' : ''} in ${b.id} (yours replace Claude’s camera there) <button type="button" data-h="cclear">Clear ${b.id}</button>` : ''}`; }
     else if (mode === 'draw') hint.textContent = 'Draw on the frame, write what you want, then Save.';
     else hint.textContent = '';
   }
   hint.onclick = e => { const a = e.target.dataset && e.target.dataset.h; if (!a) return;
-    if (a === 'mreset' && sel) { delete R.moves[sel]; pv.applyMoves(); }
+    if (a === 'mrange') return;
+    if (a === 'mup' && sel) { setScale((R.moves[sel] || { s: 1 }).s * 1.1); changed(); return; }
+    if (a === 'mdown' && sel) { setScale((R.moves[sel] || { s: 1 }).s / 1.1); changed(); return; }
+    if (a === 'mreset' && sel) { delete R.moves[sel]; pv.applyMoves(); placeBox(); }
     if (a === 'cdel') { const t = tNow(); R.cams = R.cams.filter(x => Math.abs(x.t - t) >= 0.5 / FPS); P.review.cams = R.cams; }
     if (a === 'cclear') { const b = beatAt(tNow()); R.cams = R.cams.filter(x => !(x.t >= b.t0 && x.t < b.t1)); P.review.cams = R.cams; }
     pv.render(pv.time()); tl.redraw(); paintHint(); changed(); };
-  v.addEventListener('seeked', () => { if (mode) paintHint(); });
+  hint.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.h === 'mrange' && sel) { setScale(+e.target.value / 100); const b = hint.querySelector('.szc b'); if (b) b.textContent = e.target.value + '%'; } });
+  hint.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.h === 'mrange') changed(); });
+  v.addEventListener('seeked', () => { if (mode) paintHint(); placeBox(); });
+  window.addEventListener('resize', placeBox);
 
   /* ---------- Draw ---------- */
   let canvas = null, dbar = null, color = '#FF7A1A';
@@ -102,8 +130,9 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
   function onKey(e) { const tg = e.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return; if (e.ctrlKey || e.metaKey) return;
     const k = e.key.toLowerCase();
     if (k === 'm') setMode('move'); else if (k === 'z') setMode('cam'); else if (k === 'd') setMode('draw'); else if (k === 'escape' && mode) setMode(mode);
+    else if (mode === 'move' && sel && (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_')) { e.preventDefault(); e.stopImmediatePropagation(); setScale((R.moves[sel] || { s: 1 }).s * (e.key === '-' || e.key === '_' ? 1 / 1.1 : 1.1)); changed(); }
     else if (mode === 'move' && sel && e.key.startsWith('Arrow')) { e.preventDefault(); e.stopImmediatePropagation(); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; const st = e.shiftKey ? 1 : 0.2;
-      if (e.key === 'ArrowLeft') m.x -= st; if (e.key === 'ArrowRight') m.x += st; if (e.key === 'ArrowUp') m.y -= st; if (e.key === 'ArrowDown') m.y += st; m.x = +m.x.toFixed(2); m.y = +m.y.toFixed(2); R.moves[sel] = m; pv.applyMoves(); paintHint(); changed(); } }
+      if (e.key === 'ArrowLeft') m.x -= st; if (e.key === 'ArrowRight') m.x += st; if (e.key === 'ArrowUp') m.y -= st; if (e.key === 'ArrowDown') m.y += st; m.x = +m.x.toFixed(2); m.y = +m.y.toFixed(2); R.moves[sel] = m; pv.applyMoves(); placeBox(); paintHint(); changed(); } }
   document.addEventListener('keydown', onKey, true);
 
   const text = bid => { let s = ''; const mv = Object.keys(R.moves).filter(k => k.startsWith(bid + ':'));
@@ -112,7 +141,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
     if (ks.length) s += ' · my zoom/pan (use exactly, replaces your camera in this beat, keep it smooth): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; ');
     R.drawings.filter(d => d.beat === bid).forEach(d => { s += ` · drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`; });
     return s; };
-  return { text, destroy() { closeDraw(); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
+  return { text, destroy() { closeDraw(); box.remove(); window.removeEventListener('resize', placeBox); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
 }
 
 /* ---------- Dictate (Chrome speech recognition) ---------- */
