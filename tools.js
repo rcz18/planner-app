@@ -37,17 +37,17 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
   });
   root.addEventListener('pointermove', ev => {
     if (mode === 'move' && mdrag && sel) { R.moves[sel] = { x: +(mdrag.m0.x + cqw(ev.clientX - mdrag.x0)).toFixed(2), y: +(mdrag.m0.y + cqw(ev.clientY - mdrag.y0)).toFixed(2), s: mdrag.m0.s }; pv.applyMoves(); paintHint(); }
-    else if (mode === 'cam' && cdrag) { cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(v.currentTime); paintHint(); }
+    else if (mode === 'cam' && cdrag) { cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(pv.time()); paintHint(); }
   });
   root.addEventListener('pointerup', () => { if (mdrag) { mdrag = null; changed(); } if (cdrag) { cdrag = null; changed(); tl.redraw(); } });
   root.addEventListener('wheel', ev => {
     if (mode === 'move' && sel) { ev.preventDefault(); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +Math.max(0.2, Math.min(5, m.s * (ev.deltaY < 0 ? 1.05 : 1 / 1.05))).toFixed(3); R.moves[sel] = m; pv.applyMoves(); paintHint(); changed(); }
-    else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); k.s = +Math.max(1, Math.min(4, k.s * (ev.deltaY < 0 ? 1.04 : 1 / 1.04))).toFixed(3); pv.render(v.currentTime); paintHint(); changed(); tl.redraw(); }
+    else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); k.s = +Math.max(1, Math.min(4, k.s * (ev.deltaY < 0 ? 1.04 : 1 / 1.04))).toFixed(3); pv.render(pv.time()); paintHint(); changed(); tl.redraw(); }
   }, { passive: false });
 
   /* ---------- Zoom / Pan: one key per frame time ---------- */
   let cdrag = null;
-  const tNow = () => Math.round(v.currentTime * FPS) / FPS;
+  const tNow = () => Math.round(pv.time() * FPS) / FPS;
   function camKey() { const t = tNow(); let k = R.cams.find(x => Math.abs(x.t - t) < 0.5 / FPS);
     if (!k) { const c = camAt(pv.camsNow(), t); k = { t, s: +(+c[1]).toFixed(3), x: +(+c[2]).toFixed(2), y: +(+(c[7] || 0)).toFixed(2) }; R.cams.push(k); R.cams.sort((a, b) => a.t - b.t); }
     return k; }
@@ -66,7 +66,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange }) {
     if (a === 'mreset' && sel) { delete R.moves[sel]; pv.applyMoves(); }
     if (a === 'cdel') { const t = tNow(); R.cams = R.cams.filter(x => Math.abs(x.t - t) >= 0.5 / FPS); P.review.cams = R.cams; }
     if (a === 'cclear') { const b = beatAt(tNow()); R.cams = R.cams.filter(x => !(x.t >= b.t0 && x.t < b.t1)); P.review.cams = R.cams; }
-    pv.render(v.currentTime); tl.redraw(); paintHint(); changed(); };
+    pv.render(pv.time()); tl.redraw(); paintHint(); changed(); };
   v.addEventListener('seeked', () => { if (mode) paintHint(); });
 
   /* ---------- Draw ---------- */

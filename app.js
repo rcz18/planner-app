@@ -145,7 +145,7 @@ function mount(file) {
   tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: paintTitle });
   pv.video.addEventListener('timeupdate', markBeat); pv.video.addEventListener('seeked', markBeat);
 }
-function markBeat() { const t = pv.video.currentTime; document.querySelectorAll('.beat').forEach(c => c.classList.toggle('live', t >= +c.dataset.t0 && t < +c.dataset.t1)); }
+function markBeat() { const t = pv.time(); document.querySelectorAll('.beat').forEach(c => c.classList.toggle('live', t >= +c.dataset.t0 && t < +c.dataset.t1)); }
 
 /* ---------- sequence tabs ---------- */
 function paintTabs() {

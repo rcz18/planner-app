@@ -46,7 +46,7 @@ export function createPreview(host, project, src) {
     base[e._k] = { x: tr ? +tr[1] : 0, y: tr ? +tr[2] : 0, s: sc ? +sc[1] : 1 }; };
   if (scs.length) { sbg = document.createElement('div'); sbg.className = 'scenebg'; el.appendChild(sbg); }
   all.forEach(b => b.els.forEach(e => { if (e.bg) mk(e); }));
-  if (scs.length) { pc = document.createElement('canvas'); pc.className = 'person'; pc.width = 640; pc.height = 360; el.appendChild(pc); pctx = pc.getContext('2d'); scs.forEach(b => loadMatte(b.scene, () => render(v.currentTime))); }
+  if (scs.length) { pc = document.createElement('canvas'); pc.className = 'person'; pc.width = 640; pc.height = 360; el.appendChild(pc); pctx = pc.getContext('2d'); scs.forEach(b => loadMatte(b.scene, () => render(time()))); }
   all.forEach(b => b.els.forEach(e => { if (!e.bg) mk(e); }));
   const baseCams = all.flatMap(b => b.cam || []);
   /* your Zoom/Pan keys replace Claude's camera inside the beats where you set them (blur / darkening kept) */
@@ -74,14 +74,31 @@ export function createPreview(host, project, src) {
     ovs.forEach(([e, d]) => { d.classList.toggle('on', t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
       d.querySelectorAll('[data-glow]').forEach(g => g.classList.toggle('glow', t >= +g.dataset.glow)); d.querySelectorAll('[data-show]').forEach(g => g.classList.toggle('show', t >= +g.dataset.show)); });
   }
-  let raf = null, stopAt = DUR;
-  function loop() { render(v.currentTime); if (v.currentTime >= stopAt) v.pause(); if (!v.paused) raf = requestAnimationFrame(loop); }
-  function playFrom(s, until) { stopAt = until || DUR; v.currentTime = s; v.play().catch(() => {}); }
+  /* plan time ↔ source time: the preview plays the original footage following the exact cuts from Premiere */
+  const cuts = (project.media && Array.isArray(project.media.cuts) && project.media.cuts.length) ? project.media.cuts : [[0, DUR, 0, DUR]];
+  let seg = 0;
+  const segAt = t => { for (let i = 0; i < cuts.length; i++) if (t < cuts[i][1] - 1e-4) return i; return cuts.length - 1; };
+  const toSrc = t => { const i = segAt(t), c = cuts[i]; seg = i; return c[2] + Math.max(0, t - c[0]); };
+  const toPlan = src => { const c = cuts[seg]; if (src >= c[2] - 0.05 && src <= c[3] + 0.05) return c[0] + (src - c[2]);
+    for (let i = 0; i < cuts.length; i++) { const k = cuts[i]; if (src >= k[2] - 1e-3 && src <= k[3] + 1e-3) { seg = i; return k[0] + (src - k[2]); } } return 0; };
+  const time = () => Math.min(DUR, Math.max(0, toPlan(v.currentTime)));
+  let raf = null, stopAt = DUR, jumping = false;
+  function loop() {
+    const c = cuts[seg];
+    if (!jumping && v.currentTime >= c[3] - 0.5 / FPSRC) {
+      if (seg + 1 < cuts.length && cuts[seg + 1][0] < stopAt - 1e-3) { seg++; jumping = true; v.currentTime = cuts[seg][2]; }
+      else { v.pause(); render(Math.min(stopAt, c[1])); return; }
+    }
+    const t = time(); render(t); if (t >= stopAt - 1e-3) v.pause();
+    if (!v.paused) raf = requestAnimationFrame(loop);
+  }
+  function seek(t) { t = Math.max(0, Math.min(DUR, t)); v.currentTime = toSrc(t); render(t); }
+  function playFrom(s, until) { stopAt = until || DUR; seek(s >= DUR - 0.05 ? 0 : s); v.play().catch(() => {}); }
   v.addEventListener('play', () => { cancelAnimationFrame(raf); loop(); });
-  v.addEventListener('pause', () => render(v.currentTime));
-  v.addEventListener('seeked', () => render(v.currentTime));
-  v.addEventListener('loadedmetadata', () => { v.currentTime = Math.min(2, DUR / 2); });
+  v.addEventListener('pause', () => render(time()));
+  v.addEventListener('seeked', () => { jumping = false; if (v.paused) render(time()); });
+  v.addEventListener('loadedmetadata', () => { v.currentTime = toSrc(Math.min(2, DUR / 2)); });
   applyMoves(); render(0);
-  function refresh() { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; lt = undefined; render(v.currentTime); }
-  return { video: v, render, refresh, playFrom, byK, frame: el, applyMoves, camsNow, base };
+  function refresh() { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; lt = undefined; render(time()); }
+  return { video: v, render, refresh, playFrom, seek, time, toSrc, cuts, byK, frame: el, applyMoves, camsNow, base };
 }

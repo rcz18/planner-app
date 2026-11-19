@@ -3,6 +3,7 @@
 const FPS = 30;
 export const fmtTC = t => { t = Math.max(0, t); const f = Math.round(t * FPS), s = Math.floor(f / FPS), fr = f % FPS; return '00:00:' + String(s).padStart(2, '0') + ':' + String(fr).padStart(2, '0'); };
 const fmtS = t => t.toFixed(2) + ' s';
+const AUDIO = new Map();   // decoded audio of the last source file, shared by every sequence
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
@@ -69,7 +70,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
     lane('beats').innerHTML = BEATS.map((b, j) => `<div class="bt b${j % 4}" style="left:${b.t0 * pps}px;width:${(Math.min(b.t1, DUR) - b.t0) * pps}px" title="${esc(b.title)}"><span>${b.id} · ${b.kind || ''}</span></div>`).join('');
     lane('words').innerHTML = W.map(w => `<span class="wd" style="left:${w[0] * pps}px;width:${Math.max(6, (w[1] - w[0]) * pps)}px">${esc(w[2])}</span>`).join('');
     TR.filter(t => t.lane).forEach(t => { lane(t.id).innerHTML = t.lane.clips.map(clipHTML).join(''); });
-    const cuts = BEATS.filter(b => b.cut).map(b => b.t0);
+    const cuts = [...new Set([...BEATS.filter(b => b.cut).map(b => b.t0), ...cutsL.slice(1).map(c => c[0])])];
     lane('video').innerHTML = `<div class="clip cV" style="left:0;width:${DUR * pps}px"><canvas class="thumbs" width="${Math.round(DUR * pps)}" height="40"></canvas><span>${esc(project.media?.video?.split('/').pop() || 'Video')}</span>${cuts.map(t => `<i class="cut" style="left:${t * pps}px"></i>`).join('')}</div>`;
     paintThumbs();
     const cams = pv.camsNow ? pv.camsNow() : BEATS.flatMap(b => b.cam || []); const userT = new Set(((project.review || {}).cams || []).map(k => k.t));
@@ -79,17 +80,21 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
   }
 
   /* thumbnails + waveform from the linked video */
+  const cutsL = pv.cuts || [[0, DUR, 0, DUR]];
+  const srcAt = t => { const c = cutsL.find(k => t < k[1] - 1e-4) || cutsL[cutsL.length - 1]; return c[2] + Math.max(0, t - c[0]); };
   const thumbs = []; let thumbsOK = false, peaks = null;
   async function makeThumbs() { try {
     const tv = document.createElement('video'); tv.src = v.src; tv.muted = true; tv.preload = 'auto';
     await new Promise(r => { tv.onloadeddata = r; tv.onerror = r; setTimeout(r, 8000); });
-    for (let k = 0; k <= Math.ceil(DUR / 0.5); k++) { const t = Math.min(DUR - 0.05, k * 0.5); await new Promise(r => { tv.onseeked = r; tv.currentTime = t; setTimeout(r, 1500); });
+    for (let k = 0; k <= Math.ceil(DUR / 0.5); k++) { const t = Math.min(DUR - 0.05, k * 0.5); const st = srcAt(t); await new Promise(r => { tv.onseeked = r; tv.currentTime = st; setTimeout(r, 1500); });
       const c = document.createElement('canvas'); c.width = 72; c.height = 40; c.getContext('2d').drawImage(tv, 0, 0, 72, 40); thumbs.push({ t, c }); }
     thumbsOK = true; paintThumbs(); } catch (e) {} }
   async function makeWave() { try {
-    const buf = await (await fetch(v.src)).arrayBuffer(); const ac = new OfflineAudioContext(1, 44100, 44100); const ab = await ac.decodeAudioData(buf);
-    const ch = ab.getChannelData(0), per = Math.floor(ab.sampleRate / 200); peaks = new Float32Array(Math.ceil(ch.length / per));
-    for (let i = 0; i < peaks.length; i++) { let m = 0; for (let j = i * per; j < Math.min(ch.length, (i + 1) * per); j++) { const a = Math.abs(ch[j]); if (a > m) m = a; } peaks[i] = m; }
+    const blob = await (await fetch(v.src)).blob(); if (blob.size > 600e6) return;
+    const key = blob.size + ':' + blob.type; let ab = AUDIO.get(key);
+    if (!ab) { const ac = new OfflineAudioContext(1, 44100, 44100); ab = await ac.decodeAudioData(await blob.arrayBuffer()); AUDIO.clear(); AUDIO.set(key, ab); }
+    const ch = ab.getChannelData(0), sr = ab.sampleRate, per = Math.floor(sr / 200); peaks = new Float32Array(Math.ceil(DUR * 200));
+    for (let i = 0; i < peaks.length; i++) { const s0 = Math.floor(srcAt(i / 200) * sr); let m = 0; for (let j = s0; j < Math.min(ch.length, s0 + per); j++) { const a = Math.abs(ch[j]); if (a > m) m = a; } peaks[i] = m; }
     paintWave(); } catch (e) {} }
   function paintThumbs() { const cv = lane('video')?.querySelector('canvas.thumbs'); if (!cv || !thumbsOK) return; const x = cv.getContext('2d'); x.clearRect(0, 0, cv.width, cv.height);
     for (let px = 0; px < cv.width; px += 72) { const t = px / pps; const th = thumbs.reduce((a, b) => Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a, thumbs[0]); x.globalAlpha = .85; x.drawImage(th.c, px, 0); } }
@@ -98,14 +103,14 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
   if (v.src) { makeThumbs(); makeWave(); }
 
   /* playhead + transport */
-  const now = () => v.currentTime || 0;
+  const now = () => pv.time();
   function movePH() { ph.style.left = (now() * pps) + 'px'; tcEl.textContent = fmtTC(now()); }
   let alive = true; (function loop() { if (!alive) return; movePH(); if (!v.paused) { const x = now() * pps; if (x > scroll.scrollLeft + scroll.clientWidth - 30 || x < scroll.scrollLeft) scroll.scrollLeft = x - 60; } requestAnimationFrame(loop); })();
   const playBtn = box.querySelector('.tlPlay'); const setIcon = () => { playBtn.textContent = v.paused ? '▶' : '❚❚'; };
   v.addEventListener('play', setIcon); v.addEventListener('pause', setIcon);
   function togglePlay() { if (v.paused) { const t = now(); pv.playFrom(t >= DUR - 0.05 ? 0 : t); } else v.pause(); }
   playBtn.onclick = togglePlay;
-  function seek(t) { t = Math.max(0, Math.min(DUR, t)); v.pause(); v.currentTime = t; pv.render(t); movePH(); }
+  function seek(t) { t = Math.max(0, Math.min(DUR, t)); v.pause(); pv.seek(t); movePH(); }
   box.querySelectorAll('.tlStep').forEach(b => b.onclick = () => seek(Math.round(now() * FPS + +b.dataset.d) / FPS));
   let scrub = false; const tAt = cx => (cx - inner.getBoundingClientRect().left) / pps;
   inner.addEventListener('pointerdown', ev => { if (ev.target.closest('.clip.cG,.clip.cS')) return; scrub = true; inner.setPointerCapture(ev.pointerId); seek(tAt(ev.clientX)); });
