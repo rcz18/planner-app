@@ -6,7 +6,7 @@ const fmtS = t => t.toFixed(2) + ' s';
 const AUDIO = new Map();   // decoded audio of the last source file, shared by every sequence
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
+export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, onMedia } = {}) {
   const v = pv.video, BEATS = project.beats, W = project.words || [], DUR = project.duration;
   project.timeline = project.timeline || {};
   box.innerHTML = `
@@ -17,7 +17,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
     <span class="tlTC">00:00:00:00</span><span class="tlDur">/ ${fmtTC(DUR)}</span>
     <span class="tlSep"></span>
     <button type="button" class="tlBtn tlSnap on" title="Snapping (S)">🧲 Snap</button>
-    <button type="button" class="tlBtn tlUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
+    <button type="button" class="tlBtn tlUndo" title="Undo your last change (Ctrl+Z)">↶ Undo</button>
     <button type="button" class="tlBtn tlReset" disabled title="Put the selected clip back where Claude had it">Reset clip</button>
     <button type="button" class="tlBtn tlResetAll" title="Undo every timing change">Reset all</button>
     <span class="tlSel"></span><span class="tlGrow"></span>
@@ -49,13 +49,15 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
   const nV = gL.length + sL.length + 1;
   gL.slice().reverse().forEach((L, j) => TR.push({ id: 'g' + j, name: 'V' + (nV - j), sub: 'Text / anim', cls: 'trG', h: 24, lane: L }));
   sL.slice().reverse().forEach((L, j) => TR.push({ id: 's' + j, name: 'V' + (sL.length - j + 1), sub: 'Scene', cls: 'trS', h: 24, lane: L }));
+  TR.splice(2, 0, { id: 'mine', name: 'Yours', sub: 'Photo / video', cls: 'trM', h: 24 });
   TR.push({ id: 'video', name: 'V1', sub: 'Video', cls: 'trV', h: 42 }, { id: 'cam', name: 'Cam', sub: 'Zoom / pan', cls: 'trC', h: 22 }, { id: 'audio', name: 'A1', sub: 'Audio', cls: 'trA', h: 38 });
   const RULER = 24;
   heads.innerHTML = `<div class="thd thRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="thd ${t.cls}" style="height:${t.h}px"><b>${t.name}</b>${t.sub ? `<small>${t.sub}</small>` : ''}</div>`).join('');
   inner.insertAdjacentHTML('afterbegin', `<div class="tlRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="tlLane ${t.cls}" data-tr="${t.id}" style="height:${t.h}px"></div>`).join(''));
   const ruler = inner.querySelector('.tlRuler'), lane = id => inner.querySelector(`.tlLane[data-tr="${id}"]`);
 
-  let pps = 100, sel = null;
+  let pps = 100, sel = null, msel = null, mdr = null;
+  const mineList = () => ((project.review || {}).media || []);
   const fitPPS = () => Math.max(30, (scroll.clientWidth - 8) / DUR);
   const setZoom = z => { pps = fitPPS() * Math.pow(8, z / 100); draw(); };
   zoomIn.oninput = () => setZoom(+zoomIn.value);
@@ -70,6 +72,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
     lane('beats').innerHTML = BEATS.map((b, j) => `<div class="bt b${j % 4}" style="left:${b.t0 * pps}px;width:${(Math.min(b.t1, DUR) - b.t0) * pps}px" title="${esc(b.title)}"><span>${b.id} · ${b.kind || ''}</span></div>`).join('');
     lane('words').innerHTML = W.map(w => `<span class="wd" style="left:${w[0] * pps}px;width:${Math.max(6, (w[1] - w[0]) * pps)}px">${esc(w[2])}</span>`).join('');
     TR.filter(t => t.lane).forEach(t => { lane(t.id).innerHTML = t.lane.clips.map(clipHTML).join(''); });
+    drawMine();
     const cuts = [...new Set([...BEATS.filter(b => b.cut).map(b => b.t0), ...cutsL.slice(1).map(c => c[0])])];
     lane('video').innerHTML = `<div class="clip cV" style="left:0;width:${DUR * pps}px"><canvas class="thumbs" width="${Math.round(DUR * pps)}" height="40"></canvas><span>${esc(project.media?.video?.split('/').pop() || 'Video')}</span>${cuts.map(t => `<i class="cut" style="left:${t * pps}px"></i>`).join('')}</div>`;
     paintThumbs();
@@ -113,7 +116,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
   function seek(t) { t = Math.max(0, Math.min(DUR, t)); v.pause(); pv.seek(t); movePH(); }
   box.querySelectorAll('.tlStep').forEach(b => b.onclick = () => seek(Math.round(now() * FPS + +b.dataset.d) / FPS));
   let scrub = false; const tAt = cx => (cx - inner.getBoundingClientRect().left) / pps;
-  inner.addEventListener('pointerdown', ev => { if (ev.target.closest('.clip.cG,.clip.cS')) return; scrub = true; inner.setPointerCapture(ev.pointerId); seek(tAt(ev.clientX)); });
+  inner.addEventListener('pointerdown', ev => { if (ev.target.closest('.clip.cG,.clip.cS,.clip.cM')) return; scrub = true; inner.setPointerCapture(ev.pointerId); seek(tAt(ev.clientX)); });
   inner.addEventListener('pointermove', ev => { if (scrub) seek(tAt(ev.clientX)); });
   inner.addEventListener('pointerup', () => { scrub = false; });
 
@@ -142,14 +145,14 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
   function resetClip(c) { undo.push({ c, st: { ...c.st } }); c.st = { in: c.o.in, out: c.o.out, off: 0 }; apply(c); commit(c); }
   box.querySelector('.tlReset').onclick = () => { if (sel) { resetClip(sel); pv.refresh(); draw(); showSel(); } };
   box.querySelector('.tlResetAll').onclick = () => { clips.filter(changed).forEach(resetClip); pv.refresh(); draw(); showSel(); };
-  function doUndo() { const u = undo.pop(); if (!u) return; u.c.st = u.st; apply(u.c); commit(u.c); pv.refresh(); draw(); select(u.c); }
+  function doUndo() { if (onUndo) { onUndo(); return; } const u = undo.pop(); if (!u) return; u.c.st = u.st; apply(u.c); commit(u.c); pv.refresh(); draw(); select(u.c); }
   box.querySelector('.tlUndo').onclick = doUndo;
   function onKey(ev) { const tg = ev.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
     if (ev.code === 'Space') { ev.preventDefault(); togglePlay(); }
     else if (ev.key === 'ArrowLeft') { ev.preventDefault(); seek(Math.round(now() * FPS - (ev.shiftKey ? FPS : 1)) / FPS); }
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); seek(Math.round(now() * FPS + (ev.shiftKey ? FPS : 1)) / FPS); }
     else if (ev.key === 'Home') seek(0); else if (ev.key === 'End') seek(DUR);
-    else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); doUndo(); }
+    else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (!onUndo) { ev.preventDefault(); doUndo(); } }
     else if (ev.key.toLowerCase() === 's' && !ev.ctrlKey && !ev.metaKey) setSnap(!snap);
     else if (ev.key === '=' || ev.key === '+') { zoomIn.value = Math.min(100, +zoomIn.value + 10); setZoom(+zoomIn.value); }
     else if (ev.key === '-') { zoomIn.value = Math.max(0, +zoomIn.value - 10); setZoom(+zoomIn.value); } }
@@ -159,5 +162,19 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
 
   const changesText = bid => { const ch = clips.filter(c => c.beat === bid && changed(c)); if (!ch.length) return '';
     return ' · timeline (apply exactly): ' + ch.map(c => `el#${c.i} “${c.label}” in ${c.o.in.toFixed(2)}→${c.st.in.toFixed(2)} s, out ${c.o.out.toFixed(2)}→${c.st.out.toFixed(2)} s${Math.abs(c.st.off) > .004 ? ' (whole clip moved)' : ''}`).join('; '); };
-  return { seek, togglePlay, changesText, redraw: () => draw(), now, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); } };
+  /* your photos / videos (suggestions for Claude): one lane, drag to move, drag the edges to trim */
+  function drawMine() { const L = lane('mine'); if (!L) return;
+    L.innerHTML = mineList().map(m => `<div class="clip cM${msel === m.id ? ' sel' : ''}" data-m="${esc(m.id)}" style="left:${m.t0 * pps}px;width:${Math.max(4, (m.t1 - m.t0) * pps)}px" title="${esc(m.name || '')} · ${fmtS(m.t0)} → ${fmtS(m.t1)}"><i class="hl"></i><span>${m.type === 'video' ? '🎞' : '🖼'} ${esc(m.name || 'media')}</span><i class="hr"></i></div>`).join(''); }
+  inner.addEventListener('pointerdown', ev => { const el = ev.target.closest('.clip.cM'); if (!el) return; ev.preventDefault(); const m = mineList().find(x => x.id === el.dataset.m); if (!m) return;
+    msel = m.id; onMedia && onMedia('select', m); mdr = { m, mode: ev.target.classList.contains('hl') ? 'l' : ev.target.classList.contains('hr') ? 'r' : 'm', x0: ev.clientX, a: m.t0, b: m.t1, moved: false }; inner.setPointerCapture(ev.pointerId); drawMine(); });
+  inner.addEventListener('pointermove', ev => { if (!mdr) return; const dt = (ev.clientX - mdr.x0) / pps; if (!mdr.moved && Math.abs(ev.clientX - mdr.x0) < 3) return; mdr.moved = true;
+    const m = mdr.m, len = mdr.b - mdr.a;
+    if (mdr.mode === 'm') { const a = Math.max(0, Math.min(DUR - len, snapT(mdr.a + dt))); m.t0 = +a.toFixed(3); m.t1 = +(a + len).toFixed(3); }
+    else if (mdr.mode === 'l') m.t0 = +Math.max(0, Math.min(mdr.b - 0.1, snapT(mdr.a + dt))).toFixed(3);
+    else m.t1 = +Math.min(DUR, Math.max(mdr.a + 0.1, snapT(mdr.b + dt))).toFixed(3);
+    drawMine(); seek(mdr.mode === 'r' ? Math.max(0, m.t1 - 0.04) : m.t0 + 0.02); onMedia && onMedia('move', m); });
+  inner.addEventListener('pointerup', () => { if (mdr && mdr.moved) onChange && onChange(); mdr = null; });
+  /* re-read your timeline edits after an undo */
+  function sync() { clips.forEach(c => { const s = project.timeline[c.k]; c.st = s ? { in: +s.in, out: +s.out, off: +(s.off || 0) } : { in: c.o.in, out: c.o.out, off: 0 }; apply(c); }); pv.refresh(); draw(); showSel(); }
+  return { seek, togglePlay, changesText, sync, redraw: () => draw(), now, selectMedia: id => { msel = id; drawMine(); }, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); } };
 }
