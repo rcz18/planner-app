@@ -134,3 +134,11 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 #newDlg{width:min(520px,92vw)}
 
 .brand .ver{font:500 10px 'Roboto Mono',monospace;color:var(--dim);margin-left:2px}
+
+.seqTab.pend{cursor:default;border-style:dashed;min-width:150px;padding-bottom:9px}
+.seqTab.pend span{max-width:150px}.seqTab.pend em{position:absolute;top:5px;right:8px;font:600 10px 'Roboto Mono';color:var(--orange2);font-style:normal}
+.pbar{position:absolute;left:8px;right:8px;bottom:4px;height:3px;border-radius:2px;background:#33333c;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--orange);transition:width .6s}
+.seqTab.pend:not(.done):not(.err) .pbar i{background:linear-gradient(90deg,var(--orange),#ffd29a,var(--orange));background-size:200% 100%;animation:pbarMove 1.4s linear infinite}
+@keyframes pbarMove{to{background-position:-200% 0}}
+.seqTab.pend.done .pbar i{background:#4ade80}.seqTab.pend.err .pbar i{background:#ef4444}

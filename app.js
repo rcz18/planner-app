@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=7';
-import { createTimeline, fmtTC } from './timeline.js?v=7';
-import { attachTools, wireMic } from './tools.js?v=7';
+import { createPreview } from './engine.js?v=8';
+import { createTimeline, fmtTC } from './timeline.js?v=8';
+import { attachTools, wireMic } from './tools.js?v=8';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -121,6 +121,8 @@ async function load(data) {
   $('#start').hidden = true; $('#work').hidden = false;
   paintTitle();
   await switchSeq((P.current && P.sequences.find(s => s.id === P.current)) ? P.current : P.sequences[0].id);
+  try { lastFileStamp = fh ? (await fh.getFile()).lastModified : 0; } catch (e) {}
+  Object.keys(jobs).forEach(k => delete jobs[k]); pollSoon(500);
 }
 async function switchSeq(id) {
   const seq = P.sequences.find(s => s.id === id); if (!seq) return;
@@ -152,14 +154,49 @@ function paintTabs() {
   const bar = $('#seqTabs'); if (!P) { bar.hidden = true; return; } bar.hidden = false;
   const html = P.sequences.map(s => { const r = s.review, n = Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.general.trim() ? 1 : 0);
     return `<button type="button" class="seqTab${s === S ? ' cur' : ''}" data-seq="${esc(s.id)}" title="${esc(s.label || '')}"><b>${esc(s.name || s.id.toUpperCase())}</b><span>${esc(s.label || '')}</span>${n ? '<i class="edits" title="Has your edits"></i>' : ''}</button>`; }).join('');
-  const all = html + `<button type="button" class="seqTab newSeq" data-new="1" title="Ask Claude to plan a new sequence"><b>＋ New</b><span>ask Claude</span></button>`;
+  const pend = Object.values(jobs).filter(j => !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase())).map(j => {
+    const pct = Math.max(0, Math.min(100, +j.pct || 0)), st = j.state === 'error' ? 'err' : j.state === 'done' ? 'done' : '';
+    return `<div class="seqTab pend ${st}" title="${esc(j.step || '')}"><b>${esc(j.seq)}</b><span>${esc(j.step || 'Waiting for Claude…')}</span><div class="pbar"><i style="width:${pct}%"></i></div><em>${pct}%</em></div>`; }).join('');
+  const all = html + pend + `<button type="button" class="seqTab newSeq" data-new="1" title="Ask Claude to plan a new sequence"><b>＋ New</b><span>ask Claude</span></button>`;
   if (bar._h !== all) { bar.innerHTML = all; bar._h = all; }
 }
 $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
 
+/* ---------- progress from Claude: Claude writes "Planner App/planner-status.json" while it works ---------- */
+const jobs = {};             // seq name (lower case) → { seq, pct, step, state }
+let pollT = null, lastFileStamp = 0;
+function pollSoon(ms = 1500) { clearTimeout(pollT); pollT = setTimeout(poll, ms); }
+async function poll() {
+  if (!P) return;
+  try {
+    const dir = await kvGet('folder:' + P.id);
+    if (dir && (await dir.queryPermission({ mode: 'read' })) === 'granted') {
+      const f = await fileFromFolder(dir, 'Planner App/planner-status.json');
+      if (f) { const st = JSON.parse(await f.text()); (st.jobs || []).filter(j => !j.project || j.project === P.id).forEach(j => { jobs[String(j.seq).toLowerCase()] = { ...jobs[String(j.seq).toLowerCase()], ...j }; }); }
+    }
+    if (fh && Object.values(jobs).some(j => j.state === 'done')) await pullNewSequences();
+  } catch (e) {}
+  paintTabs();
+  const busy = Object.values(jobs).some(j => j.state !== 'done' && j.state !== 'error' && !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase()));
+  pollSoon(busy ? 3000 : 15000);
+}
+/* add sequences Claude put in the file, without touching your unsaved edits */
+async function pullNewSequences() {
+  const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
+  const data = normalize(JSON.parse(await f.text())); if (!data) return;
+  const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
+  if (!added.length) return;
+  added.forEach(s => { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences.push(s); });
+  savedSig = sig();   // the new tabs come from the file, so they are not unsaved changes
+  paintTabs();
+  const n = added.map(s => s.name || s.id.toUpperCase()).join(', ');
+  status(n + ' is ready ✓'); $('#sendMsg').innerHTML = `<b>${esc(n)}</b> is ready ✓ <button type="button" class="btn" id="openNew">Open ${esc(added[0].name || added[0].id)}</button>`;
+  $('#openNew').onclick = () => switchSeq(added[0].id);
+}
+
 /* ---------- ask Claude for a new sequence (e.g. H14) ---------- */
 function newSeqDialog() {
-  const d = $('#newDlg'); const next = 'H' + (P.sequences.length + 1);
+  const d = $('#newDlg'); const nums = P.sequences.map(s => +((s.name || '').match(/^H(\d+)$/i) || [])[1] || 0).concat(Object.values(jobs).map(j => +(j.seq.match(/^H(\d+)$/i) || [])[1] || 0)); const next = 'H' + (Math.max(0, ...nums) + 1);
   d.querySelector('[name=sname]').value = /^H\d+$/.test(S?.name || '') ? next : ''; d.querySelector('[name=snote]').value = '';
   wireMic(d.querySelector('.mic'), d.querySelector('[name=snote]'));
   d.querySelector('.no').onclick = () => d.close();
@@ -169,8 +206,9 @@ function newSeqDialog() {
     const ok = await save({ kind: 'new', sequence: name, at: new Date().toISOString(), summary: `New sequence ${name} for ${P.name}. ${note ? 'Notes: ' + note : ''}`.trim() });
     if (!ok) return;
     const line = `New ${name} · ${fh.name}`; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-    $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Paste it in the Claude chat (Ctrl+V).' : 'Type in the Claude chat: <b>' + esc(line) + '</b>'} When Claude adds it, open the file again (or Ctrl+O) to see the new tab.`;
+    $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Paste it in the Claude chat (Ctrl+V).' : 'Type in the Claude chat: <b>' + esc(line) + '</b>'} The new tab shows Claude’s progress and opens by itself when it’s ready.`;
     status('Request saved: paste it in the Claude chat');
+    jobs[name.toLowerCase()] = { seq: name, pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting' }; paintTabs(); pollSoon();
   };
   d.showModal();
 }
