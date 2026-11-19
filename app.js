@@ -149,12 +149,31 @@ function markBeat() { const t = pv.video.currentTime; document.querySelectorAll(
 
 /* ---------- sequence tabs ---------- */
 function paintTabs() {
-  const bar = $('#seqTabs'); if (!P || P.sequences.length < 2) { bar.hidden = true; return; } bar.hidden = false;
+  const bar = $('#seqTabs'); if (!P) { bar.hidden = true; return; } bar.hidden = false;
   const html = P.sequences.map(s => { const r = s.review, n = Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.general.trim() ? 1 : 0);
     return `<button type="button" class="seqTab${s === S ? ' cur' : ''}" data-seq="${esc(s.id)}" title="${esc(s.label || '')}"><b>${esc(s.name || s.id.toUpperCase())}</b><span>${esc(s.label || '')}</span>${n ? '<i class="edits" title="Has your edits"></i>' : ''}</button>`; }).join('');
-  if (bar._h !== html) { bar.innerHTML = html; bar._h = html; }
+  const all = html + `<button type="button" class="seqTab newSeq" data-new="1" title="Ask Claude to plan a new sequence"><b>＋ New</b><span>ask Claude</span></button>`;
+  if (bar._h !== all) { bar.innerHTML = all; bar._h = all; }
 }
-$('#seqTabs').onclick = e => { const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
+$('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
+
+/* ---------- ask Claude for a new sequence (e.g. H14) ---------- */
+function newSeqDialog() {
+  const d = $('#newDlg'); const next = 'H' + (P.sequences.length + 1);
+  d.querySelector('[name=sname]').value = /^H\d+$/.test(S?.name || '') ? next : ''; d.querySelector('[name=snote]').value = '';
+  wireMic(d.querySelector('.mic'), d.querySelector('[name=snote]'));
+  d.querySelector('.no').onclick = () => d.close();
+  d.querySelector('.yes').onclick = async () => {
+    const name = d.querySelector('[name=sname]').value.trim(); if (!name) return;
+    const note = d.querySelector('[name=snote]').value.trim(); d.close();
+    const ok = await save({ kind: 'new', sequence: name, at: new Date().toISOString(), summary: `New sequence ${name} for ${P.name}. ${note ? 'Notes: ' + note : ''}`.trim() });
+    if (!ok) return;
+    const line = `New ${name} · ${fh.name}`; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
+    $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Paste it in the Claude chat (Ctrl+V).' : 'Type in the Claude chat: <b>' + esc(line) + '</b>'} When Claude adds it, open the file again (or Ctrl+O) to see the new tab.`;
+    status('Request saved: paste it in the Claude chat');
+  };
+  d.showModal();
+}
 
 /* ---------- beats panel ---------- */
 function paintBeats() {

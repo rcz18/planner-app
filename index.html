@@ -58,6 +58,10 @@
   <section id="timeline" class="tl"></section>
 </main>
 
+<dialog id="newDlg"><h3 style="margin:0 0 10px">New sequence</h3>
+  <label class="fld">Name <input name="sname" placeholder="H14"></label>
+  <label class="fld">What should Claude know? <span class="noteRow"><textarea name="snote" rows="4" placeholder="e.g. Premiere sequence H14 is cut. Style idea, client notes, anything to avoid…"></textarea><button type="button" class="mic" title="Dictate">🎤</button></span></label>
+  <div class="dlgBtns"><button type="button" class="btn no">Cancel</button><button type="button" class="btn primary yes">Send to Claude</button></div></dialog>
 <input type="file" id="fileInput" accept=".planner,application/json" hidden>
 <dialog id="dlg"><p></p><div class="dlgBtns"><button type="button" class="btn no"></button><button type="button" class="btn primary yes"></button></div></dialog>
 <script type="module" src="app.js"></script>
