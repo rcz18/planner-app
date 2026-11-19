@@ -40,16 +40,31 @@ export function createPreview(host, project, src) {
   const scrim = document.createElement('div'); scrim.className = 'scrim'; el.appendChild(scrim);
   const ovs = [], byK = {};
   const scs = all.filter(b => b.scene); let sbg = null, pc = null, pctx = null;
-  const mk = e => { const d = document.createElement('div'); d.className = 'ov ' + (e.cls || ''); d.style.cssText = e.pos || ''; d.innerHTML = e.html || ''; d.dataset.k = e._k; el.appendChild(d); ovs.push([e, d]); byK[e._k] = d; };
+  const base = {};
+  const mk = e => { const d = document.createElement('div'); d.className = 'ov ' + (e.cls || ''); d.style.cssText = e.pos || ''; d.innerHTML = e.html || ''; d.dataset.k = e._k; el.appendChild(d); ovs.push([e, d]); byK[e._k] = d;
+    const tr = /translate:\s*(-?[\d.]+)cqw\s+(-?[\d.]+)cqw/.exec(e.pos || ''), sc = /(?:^|;)\s*scale:\s*([\d.]+)/.exec(e.pos || '');
+    base[e._k] = { x: tr ? +tr[1] : 0, y: tr ? +tr[2] : 0, s: sc ? +sc[1] : 1 }; };
   if (scs.length) { sbg = document.createElement('div'); sbg.className = 'scenebg'; el.appendChild(sbg); }
   all.forEach(b => b.els.forEach(e => { if (e.bg) mk(e); }));
   if (scs.length) { pc = document.createElement('canvas'); pc.className = 'person'; pc.width = 640; pc.height = 360; el.appendChild(pc); pctx = pc.getContext('2d'); scs.forEach(b => loadMatte(b.scene, () => render(v.currentTime))); }
   all.forEach(b => b.els.forEach(e => { if (!e.bg) mk(e); }));
-  const cams = all.flatMap(b => b.cam || []);
+  const baseCams = all.flatMap(b => b.cam || []);
+  /* your Zoom/Pan keys replace Claude's camera inside the beats where you set them (blur / darkening kept) */
+  function camsNow() {
+    const keys = (project.review && project.review.cams) || []; if (!keys.length) return baseCams;
+    const inUser = t => all.some(b => t >= b.t0 && t < b.t1 && keys.some(k => k.t >= b.t0 && k.t < b.t1));
+    const out = baseCams.filter(c => !inUser(c[0]));
+    keys.forEach(k => { const b = camAt(baseCams, k.t); out.push([k.t, k.s, k.x, b[3] || 0, b[4] || 0, false, 'e', k.y]); });
+    return out.sort((a, b) => a[0] - b[0]);
+  }
+  function applyMoves() { const mv = (project.review && project.review.moves) || {};
+    Object.keys(byK).forEach(k => { const d = byK[k], b = base[k], m = mv[k];
+      if (!m) { d.style.translate = b.x || b.y ? `${b.x}cqw ${b.y}cqw` : ''; d.style.scale = b.s !== 1 ? String(b.s) : ''; return; }
+      d.style.translate = `${(b.x + m.x).toFixed(2)}cqw ${(b.y + m.y).toFixed(2)}cqw`; d.style.scale = String(+(b.s * m.s).toFixed(3)); }); }
   let lt;
   function render(t) {
     if (lt !== undefined && t < lt - 0.05) { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; } lt = t;
-    const c = camAt(cams, t);
+    const c = camAt(camsNow(), t);
     v.style.transformOrigin = '50% 12%'; v.style.transform = `translate(${c[2]}%, ${c[7] || 0}%) scale(${c[1]})`;
     const gr = grayAt(all, t); v.style.filter = ((c[3] ? `blur(${c[3]}cqw)` : '') + (gr ? ' grayscale(1)' : '')) || 'none';
     { const fk = all.filter(b => b.cut && t >= b.t0).length; const cutNow = el._fk !== undefined && el._fk !== fk; v.style.transition = cutNow ? 'none' : 'transform .35s cubic-bezier(.3,.9,.3,1)'; if (cutNow) void v.offsetWidth; el._fk = fk; }
@@ -66,7 +81,7 @@ export function createPreview(host, project, src) {
   v.addEventListener('pause', () => render(v.currentTime));
   v.addEventListener('seeked', () => render(v.currentTime));
   v.addEventListener('loadedmetadata', () => { v.currentTime = Math.min(2, DUR / 2); });
-  render(0);
+  applyMoves(); render(0);
   function refresh() { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; lt = undefined; render(v.currentTime); }
-  return { video: v, render, refresh, playFrom, byK, frame: el };
+  return { video: v, render, refresh, playFrom, byK, frame: el, applyMoves, camsNow, base };
 }

@@ -1,5 +1,6 @@
 import { createPreview } from './engine.js';
 import { createTimeline, fmtTC } from './timeline.js';
+import { attachTools, wireMic } from './tools.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -17,7 +18,7 @@ let P = null;            // open project (parsed)
 let orig = null;         // Claude's plan as loaded (beats are saved back unchanged)
 let fh = null;           // file handle of the open .planner
 let savedSig = '';       // to show "not saved"
-let pv = null, tl = null, mediaURL = null;
+let pv = null, tl = null, tools = null, mediaURL = null;
 
 const sig = () => P ? JSON.stringify([P.review, P.timeline]) : '';
 const dirty = () => P && sig() !== savedSig;
@@ -106,10 +107,12 @@ function mount(file) {
   if (file) $('#linkMedia').hidden = true;
   if (mediaURL) URL.revokeObjectURL(mediaURL);
   mediaURL = file ? URL.createObjectURL(file) : '';
-  tl && tl.destroy();
+  tl && tl.destroy(); tools && tools.destroy(); tools = null;
   P.beats = JSON.parse(JSON.stringify(orig));
   pv = createPreview($('#monitor'), P, mediaURL);
   tl = createTimeline($('#timeline'), P, pv, { onChange: paintTitle });
+  tools && tools.destroy();
+  tools = attachTools({ P, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: paintTitle });
   pv.video.addEventListener('timeupdate', markBeat); pv.video.addEventListener('seeked', markBeat);
 }
 function markBeat() { const t = pv.video.currentTime; document.querySelectorAll('.beat').forEach(c => c.classList.toggle('live', t >= +c.dataset.t0 && t < +c.dataset.t1)); }
@@ -124,12 +127,13 @@ function paintBeats() {
       <div class="picks" role="group" aria-label="Your pick">
         <button type="button" data-c="approve">Approve</button><button type="button" data-c="other">Make something else</button><button type="button" data-c="none">No graphic</button>
       </div>
-      <textarea data-note="${b.id}" rows="2" placeholder="Notes for this beat"></textarea>
+      <div class="noteRow"><textarea data-note="${b.id}" rows="2" placeholder="Notes for this beat"></textarea><button type="button" class="mic" title="Dictate">🎤</button></div>
     </article>`).join('');
-  $('#general').value = P.review.general || '';
+  $('#general').value = P.review.general || ''; wireMic($('#genMic'), $('#general'));
   document.querySelectorAll('.beat').forEach(c => {
     const id = c.dataset.id;
     c.querySelector('textarea').value = P.review.notes[id] || '';
+    wireMic(c.querySelector('.mic'), c.querySelector('textarea'));
     c.querySelectorAll('.picks button').forEach(b => { b.setAttribute('aria-pressed', P.review.picks[id] === b.dataset.c ? 'true' : 'false');
       b.onclick = () => { P.review.picks[id] = P.review.picks[id] === b.dataset.c ? '' : b.dataset.c; c.querySelectorAll('.picks button').forEach(x => x.setAttribute('aria-pressed', P.review.picks[id] === x.dataset.c ? 'true' : 'false')); paintTitle(); }; });
     c.querySelector('.playBeat').onclick = () => pv && pv.playFrom(+c.dataset.t0, Math.min(P.duration, +c.dataset.t1 + 0.8));
@@ -143,7 +147,7 @@ document.addEventListener('input', e => { if (!P) return; const t = e.target;
 /* ---------- Revise / Apply: saved into the project file, one line for the Claude chat ---------- */
 function summary(kind) {
   const L = [`${kind === 'apply' ? 'Apply' : 'Revise'} ${P.name || ''} (${P.version || ''}). My picks and notes:`];
-  orig.forEach(b => L.push(`${b.id} (${b.title}): ${P.review.picks[b.id] || 'no pick'}${P.review.notes[b.id] ? ' · note: ' + P.review.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}`));
+  orig.forEach(b => L.push(`${b.id} (${b.title}): ${P.review.picks[b.id] || 'no pick'}${P.review.notes[b.id] ? ' · note: ' + P.review.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}`));
   if ((P.review.general || '').trim()) L.push('General: ' + P.review.general.trim());
   return L.join('\n');
 }

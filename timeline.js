@@ -72,8 +72,8 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
     const cuts = BEATS.filter(b => b.cut).map(b => b.t0);
     lane('video').innerHTML = `<div class="clip cV" style="left:0;width:${DUR * pps}px"><canvas class="thumbs" width="${Math.round(DUR * pps)}" height="40"></canvas><span>${esc(project.media?.video?.split('/').pop() || 'Video')}</span>${cuts.map(t => `<i class="cut" style="left:${t * pps}px"></i>`).join('')}</div>`;
     paintThumbs();
-    const cams = BEATS.flatMap(b => b.cam || []);
-    lane('cam').innerHTML = cams.map(c => `<i class="kf" style="left:${c[0] * pps}px" title="${fmtS(c[0])} · zoom ${Math.round(c[1] * 100)}%"></i>`).join('') + (cams.length > 1 ? `<svg class="camLine" width="${DUR * pps}" height="22"><polyline fill="none" points="${cams.map(c => `${c[0] * pps},${20 - Math.min(18, (c[1] - 1) * 60)}`).join(' ')}"/></svg>` : '');
+    const cams = pv.camsNow ? pv.camsNow() : BEATS.flatMap(b => b.cam || []); const userT = new Set(((project.review || {}).cams || []).map(k => k.t));
+    lane('cam').innerHTML = cams.map(c => `<i class="kf${userT.has(c[0]) ? ' mine' : ''}" style="left:${c[0] * pps}px" title="${fmtS(c[0])} · zoom ${Math.round(c[1] * 100)}%"></i>`).join('') + (cams.length > 1 ? `<svg class="camLine" width="${DUR * pps}" height="22"><polyline fill="none" points="${cams.map(c => `${c[0] * pps},${20 - Math.min(18, (c[1] - 1) * 60)}`).join(' ')}"/></svg>` : '');
     lane('audio').innerHTML = `<div class="clip cA" style="left:0;width:${DUR * pps}px"><canvas class="wave" width="${Math.round(DUR * pps)}" height="36"></canvas></div>`;
     paintWave(); movePH();
   }
@@ -154,5 +154,5 @@ export function createTimeline(box, project, pv, { onChange, onSelect } = {}) {
 
   const changesText = bid => { const ch = clips.filter(c => c.beat === bid && changed(c)); if (!ch.length) return '';
     return ' · timeline (apply exactly): ' + ch.map(c => `el#${c.i} “${c.label}” in ${c.o.in.toFixed(2)}→${c.st.in.toFixed(2)} s, out ${c.o.out.toFixed(2)}→${c.st.out.toFixed(2)} s${Math.abs(c.st.off) > .004 ? ' (whole clip moved)' : ''}`).join('; '); };
-  return { seek, togglePlay, changesText, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); } };
+  return { seek, togglePlay, changesText, redraw: () => draw(), now, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); } };
 }
