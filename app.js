@@ -205,7 +205,7 @@ function newSeqDialog() {
     const note = d.querySelector('[name=snote]').value.trim(); d.close();
     const ok = await save({ kind: 'new', sequence: name, at: new Date().toISOString(), summary: `New sequence ${name} for ${P.name}. ${note ? 'Notes: ' + note : ''}`.trim() });
     if (!ok) return;
-    const line = `New ${name} · ${fh.name}`; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
+    const line = `/planner new ${name}`; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
     $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Paste it in the Claude chat (Ctrl+V).' : 'Type in the Claude chat: <b>' + esc(line) + '</b>'} The new tab shows Claude’s progress and opens by itself when it’s ready.`;
     status('Request saved: paste it in the Claude chat');
     jobs[name.toLowerCase()] = { seq: name, pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting' }; paintTabs(); pollSoon();
@@ -255,7 +255,7 @@ async function send(kind) {
   if (!P) return;
   const ok = await save({ kind, sequence: S.id, at: new Date().toISOString(), summary: summary(kind) });
   if (!ok) return;
-  const line = `${kind === 'apply' ? 'Apply' : 'Revise'} ${seqName()} · ${fh.name}`;
+  const line = `/planner ${kind === 'apply' ? 'apply' : 'revise'} ${seqName()}`;
   let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
   $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'}`;
 }
