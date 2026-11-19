@@ -73,6 +73,22 @@ export function createPreview(host, project, src) {
       if (sc && sc.scene.person !== false) { try { pctx.globalCompositeOperation = 'source-over'; pctx.clearRect(0, 0, 640, 360); pctx.drawImage(v, 0, 0, 640, 360); const m = sc.scene; if (m.alpha) { const i = Math.max(0, Math.min(m.n - 1, Math.round(t * FPSRC) - m.f0)); pctx.globalCompositeOperation = 'destination-in'; pctx.drawImage(m.alpha, (i % m.cols) * m.w, Math.floor(i / m.cols) * m.h, m.w, m.h, 0, 0, 640, 360); pctx.globalCompositeOperation = 'source-over'; } } catch (err) {} } }
     ovs.forEach(([e, d]) => { d.classList.toggle('on', t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
       d.querySelectorAll('[data-glow]').forEach(g => g.classList.toggle('glow', t >= +g.dataset.glow)); d.querySelectorAll('[data-show]').forEach(g => g.classList.toggle('show', t >= +g.dataset.show)); });
+    syncAnims(t);
+  }
+  /* paused = every animation freezes at the playhead (and scrubbing shows the right pose); play = they carry on from there */
+  let wasPaused = null;
+  function syncAnims(t) {
+    const paused = v.paused;
+    if (!paused && wasPaused === false) return; wasPaused = paused;
+    ovs.forEach(([e, d]) => { if (!d.classList.contains('on')) return; let an; try { an = d.getAnimations({ subtree: true }); } catch (err) { return; }
+      an.forEach(a => { try {
+        if (paused) {
+          if (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition) { a.finish(); return; }
+          const tg = a.effect && a.effect.target, ds = tg && tg.closest ? tg.closest('[data-show]') : null;
+          const t0 = ds && d.contains(ds) && ds.classList.contains('show') ? +ds.dataset.show : e.in;
+          a.currentTime = Math.max(0, (t - t0) * 1000); a.pause();
+        } else if (a.playState === 'paused') { const end = a.effect ? a.effect.getComputedTiming().endTime : Infinity; if (a.currentTime >= end) a.finish(); else a.play(); }
+      } catch (err) {} }); });
   }
   /* plan time ↔ source time: the preview plays the original footage following the exact cuts from Premiere */
   const cuts = (project.media && Array.isArray(project.media.cuts) && project.media.cuts.length) ? project.media.cuts : [[0, DUR, 0, DUR]];

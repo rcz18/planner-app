@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=8';
-import { createTimeline, fmtTC } from './timeline.js?v=14';
-import { attachTools, wireMic } from './tools.js?v=14';
+import { createPreview } from './engine.js?v=15';
+import { createTimeline, fmtTC } from './timeline.js?v=15';
+import { attachTools, wireMic } from './tools.js?v=15';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -156,17 +156,28 @@ function markBeat() { const t = pv.time(); document.querySelectorAll('.beat').fo
 
 /* ---------- sequence tabs ---------- */
 function paintTabs() {
-  const bar = $('#seqTabs'); if (!P) { bar.hidden = true; return; } bar.hidden = false;
+  const bar = $('#seqTabs'); if (!P) { bar.hidden = true; paintJobBar(); return; } bar.hidden = false;
   const html = P.sequences.map(s => { const r = s.review, n = s.mirror ? 0 : editCount(s);
-    const j = jobs[(s.name || s.id).toLowerCase()], show = j && (j.state !== 'done' || j._fresh);
-    const pct = j ? Math.max(0, Math.min(100, +j.pct || 0)) : 0, st = j ? (j.state === 'error' ? 'err' : j.state === 'done' ? 'done' : '') : '';
-    const prog = show ? `<div class="pbar"><i style="width:${pct}%"></i></div><em>${pct}%</em>` : '';
-    return `<button type="button" class="seqTab${s === S ? ' cur' : ''}${show ? ' work ' + st : ''}${r.approved ? ' appr' : ''}" data-seq="${esc(s.id)}" title="${esc(show ? (j.step || '') : (s.label || ''))}"><b>${esc(s.name || s.id.toUpperCase())}${r.approved ? ' <i class="ok">✓</i>' : ''}</b><span>${esc(show ? (j.step || 'Waiting for Claude…') : (s.label || ''))}</span>${n && !show ? '<i class="edits" title="Has your edits"></i>' : ''}${prog}</button>`; }).join('');
-  const pend = Object.values(jobs).filter(j => !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase())).map(j => {
-    const pct = Math.max(0, Math.min(100, +j.pct || 0)), st = j.state === 'error' ? 'err' : j.state === 'done' ? 'done' : '';
-    return `<div class="seqTab pend ${st}" title="${esc(j.step || '')}"><b>${esc(j.seq)}</b><span>${esc(j.step || 'Waiting for Claude…')}</span><div class="pbar"><i style="width:${pct}%"></i></div><em>${pct}%</em></div>`; }).join('');
+    return `<button type="button" class="seqTab${s === S ? ' cur' : ''}${r.approved ? ' appr' : ''}" data-seq="${esc(s.id)}" title="${esc(s.label || '')}"><b>${esc(s.name || s.id.toUpperCase())}${r.approved ? ' <i class="ok">✓</i>' : ''}</b><span>${esc(s.label || '')}</span>${n ? '<i class="edits" title="Has your edits"></i>' : ''}</button>`; }).join('');
+  const pend = Object.values(jobs).filter(j => j.state !== 'done' && !P.sequences.some(s => (s.name || '').toLowerCase() === j.seq.toLowerCase())).map(j =>
+    `<div class="seqTab pend" title="${esc(j.step || '')}"><b>${esc(j.seq)}</b><span>being made…</span></div>`).join('');
   const all = html + pend + `<button type="button" class="seqTab newSeq" data-new="1" title="Ask Claude to plan a new sequence"><b>＋ New</b><span>ask Claude</span></button>`;
   if (bar._h !== all) { bar.innerHTML = all; bar._h = all; }
+  paintJobBar();
+}
+/* one progress bar for everything Claude is working on (next to Apply all changes) */
+function paintJobBar() {
+  const jb = $('#jobBar'); if (!jb) return;
+  const act = Object.values(jobs).filter(j => j.state !== 'done' || j._fresh);
+  if (!P || !act.length) { jb.hidden = true; return; }
+  const pct = Math.round(act.reduce((a, j) => a + Math.max(0, Math.min(100, +j.pct || 0)), 0) / act.length);
+  const err = act.find(j => j.state === 'error'), busy = act.filter(j => j.state !== 'done'), done = !busy.length;
+  const lead = err || busy.find(j => j.state === 'working') || busy[0] || act[0];
+  const names = act.map(j => j.seq).join(', ');
+  jb.hidden = false; jb.className = 'jobBar' + (err ? ' err' : done ? ' done' : '');
+  jb.querySelector('i').style.width = (done ? 100 : pct) + '%';
+  jb.querySelector('span').textContent = err ? `Problem: ${err.step || ''}` : done ? `Done ✓ ${names}` : `Claude · ${lead.step || 'Waiting…'} · ${pct}%`;
+  jb.title = act.map(j => `${j.seq}: ${j.step || ''} ${j.state === 'done' ? '✓' : (+j.pct || 0) + '%'}`).join('\n');
 }
 $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
 
