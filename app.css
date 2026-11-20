@@ -179,3 +179,9 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .jobBar .pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--orange),#ffd29a,var(--orange));background-size:200% 100%;animation:pbarMove 1.4s linear infinite;transition:width .4s}
 .jobBar.done{border-color:#1f5e3a;background:#0f1f15;color:#bff5d0}.jobBar.done .pbar i{background:#4ade80;animation:none}
 .jobBar.err{border-color:#6b1f1f;background:#1f0f0f;color:#ffc9c9}.jobBar.err .pbar i{background:#ef4444;animation:none}
+
+/* Claude Code connection badge (v16) */
+.ccBadge{font:600 12px/1 Roboto,sans-serif;color:#9a9aa6;background:#202027;border:1px solid #2e2e38;border-radius:999px;padding:6px 10px;margin-right:8px;cursor:pointer;white-space:nowrap}
+.ccBadge:hover{color:#fff;border-color:#4a4a58}
+.ccBadge.on{color:#7ee2a0;border-color:#2f6b45;background:#16261d}
+#dlg p{white-space:pre-wrap;word-break:break-word}

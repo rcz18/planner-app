@@ -83,7 +83,6 @@ export function createPreview(host, project, src) {
     ovs.forEach(([e, d]) => { if (!d.classList.contains('on')) return; let an; try { an = d.getAnimations({ subtree: true }); } catch (err) { return; }
       an.forEach(a => { try {
         if (paused) {
-          if (typeof CSSTransition !== 'undefined' && a instanceof CSSTransition) { a.finish(); return; }
           const tg = a.effect && a.effect.target, ds = tg && tg.closest ? tg.closest('[data-show]') : null;
           const t0 = ds && d.contains(ds) && ds.classList.contains('show') ? +ds.dataset.show : e.in;
           a.currentTime = Math.max(0, (t - t0) * 1000); a.pause();

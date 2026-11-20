@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=15';
-import { createTimeline, fmtTC } from './timeline.js?v=15';
-import { attachTools, wireMic } from './tools.js?v=15';
+import { createPreview } from './engine.js?v=16';
+import { createTimeline, fmtTC } from './timeline.js?v=16';
+import { attachTools, wireMic } from './tools.js?v=16';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -119,7 +119,7 @@ async function load(data) {
   P = data; Object.keys(orig).forEach(k => delete orig[k]);
   P.sequences.forEach(s => { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); });
   savedSig = sig();
-  $('#start').hidden = true; $('#work').hidden = false; $('#renderBtn').hidden = false; $('#applyAllBtn').hidden = false;
+  $('#start').hidden = true; $('#work').hidden = false; $('#renderBtn').hidden = false; $('#applyAllBtn').hidden = false; helperPing();
   Object.keys(hist).forEach(k => delete hist[k]); Object.keys(redo).forEach(k => delete redo[k]); Object.keys(last).forEach(k => delete last[k]);
   paintTitle();
   await switchSeq((P.current && P.sequences.find(s => s.id === P.current)) ? P.current : P.sequences[0].id);
@@ -181,6 +181,58 @@ function paintJobBar() {
 }
 $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
 
+
+/* ---------- Claude Code on this computer (Planner Helper: helper/setup.ps1) ---------- */
+const HELPER = 'http://127.0.0.1:47321';
+const SETUP_CMD = 'irm https://raw.githubusercontent.com/rcz18/planner-app/main/helper/setup.ps1 | iex';
+let helper = null, helperJobT = null;
+const hfetch = (p, o = {}) => fetch(HELPER + p, { cache: 'no-store', targetAddressSpace: 'loopback', ...o });
+async function helperPing() {
+  try { const r = await hfetch('/status'); helper = r.ok ? await r.json() : null; } catch (e) { helper = null; }
+  paintHelper(); return helper;
+}
+function paintHelper() {
+  const b = $('#ccBadge'); if (!b) return; const on = !!(helper && helper.claude);
+  b.hidden = !P; b.className = 'ccBadge' + (on ? ' on' : '');
+  b.textContent = on ? (helper.busy ? '● Claude Code · working' : '● Claude Code') : '○ Claude chat';
+  b.title = on ? `Claude Code on this computer does your requests (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`
+    : helper ? 'The Planner Helper is running but Claude Code is not installed. Click to copy the setup command again.'
+    : 'Requests are copied for the Claude chat. Click to copy the setup command that lets Claude Code on this computer do them.';
+}
+/* send a saved request: straight to Claude Code when the helper runs, otherwise copy it for the Claude chat */
+async function dispatch(line, names) {
+  if ((helper && helper.claude) || (await helperPing())?.claude) {
+    try {
+      const r = await hfetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: fh.name, project: P.id, command: line }) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+      watchHelperJob(names); return 'code';
+    } catch (e) { status('Claude Code: ' + e.message + ' (copied for the chat instead)'); }
+  }
+  try { await navigator.clipboard.writeText(line); return 'copied'; } catch (e) { return 'type'; }
+}
+function sentText(mode, line, extra = '') {
+  if (mode === 'code') return `Claude Code is on it ✓ ${extra} Watch the progress bar at the top; the tab updates by itself.`;
+  return (mode === 'copied' ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra;
+}
+function watchHelperJob(names) {
+  clearTimeout(helperJobT);
+  const tick = async () => {
+    let j = null; try { j = (await (await hfetch('/job')).json()).job; } catch (e) {}
+    if (!j) { helperJobT = setTimeout(tick, 3000); return; }
+    names.forEach(n => { const k = n.toLowerCase(), cur = jobs[k] || { seq: n, pct: 0 };
+      if (j.state === 'error') jobs[k] = { ...cur, state: 'error', step: j.step };
+      else if (j.state === 'done') { if (cur.state !== 'done') jobs[k] = { ...cur, state: 'done', pct: 100, step: 'Done', at: new Date().toISOString(), _fresh: true, _doneAt: Date.now() }; }
+      else if (cur.state !== 'working' && cur.state !== 'done') jobs[k] = { ...cur, state: 'waiting', step: 'Claude Code · ' + j.step };
+    });
+    if (helper) helper.busy = j.state === 'running'; paintHelper(); paintTabs();
+    if (j.state === 'running') { helperJobT = setTimeout(tick, 2000); return; }
+    if (j.state === 'done') status('Claude Code: ' + String(j.result?.text || 'Done').split('\n')[0].slice(0, 160));
+    else status('Claude Code: ' + j.step);
+    if (fh) { lastFileStamp = 0; try { await pullNewSequences(); } catch (e) {} } pollSoon(500);
+  };
+  helperJobT = setTimeout(tick, 1200);
+}
+
 /* ---------- progress from Claude: Claude writes "Planner App/planner-status.json" while it works ---------- */
 const jobs = {};             // seq name (lower case) → { seq, pct, step, state }
 let pollT = null, lastFileStamp = 0, firstPoll = true;
@@ -238,10 +290,13 @@ function newSeqDialog() {
     const note = d.querySelector('[name=snote]').value.trim(); d.close();
     const ok = await save({ kind: 'new', sequence: name, at: new Date().toISOString(), summary: `New sequence ${name} for ${P.name}. ${note ? 'Notes: ' + note : ''}`.trim() });
     if (!ok) return;
-    const line = `/planner new ${name}`; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-    $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Paste it in the Claude chat (Ctrl+V).' : 'Type in the Claude chat: <b>' + esc(line) + '</b>'} The new tab shows Claude’s progress and opens by itself when it’s ready.`;
-    status('Request saved: paste it in the Claude chat');
-    jobs[name.toLowerCase()] = { seq: name, pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting' }; paintTabs(); pollSoon();
+    const line = `/planner new ${name}`;
+    jobs[name.toLowerCase()] = { seq: name, pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
+    const mode = await dispatch(line, [name]);
+    $('#sendMsg').innerHTML = `Request for <b>${esc(name)}</b> saved in <b>${esc(fh.name)}</b> ✓ ` + sentText(mode, line, 'The new tab opens by itself when it’s ready.');
+    status(mode === 'code' ? 'Claude Code is making ' + name : 'Request saved: paste it in the Claude chat');
+    if (mode !== 'code') jobs[name.toLowerCase()].step = 'Paste the line in the Claude chat';
+    paintTabs(); pollSoon();
   };
   d.showModal();
 }
@@ -290,9 +345,10 @@ async function send(kind) {
   const ok = await save({ kind, sequence: S.id, at: new Date().toISOString(), summary: summary(kind) });
   if (!ok) return;
   const line = `/planner ${kind === 'apply' ? 'apply' : 'revise'} ${seqName()}`;
-  let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'} The ${esc(seqName())} tab shows Claude’s progress and plays the result when it’s ready.`;
-  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting', since: new Date().toISOString() };
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
+  const mode = await dispatch(line, [seqName()]);
+  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ` + sentText(mode, line, `The ${esc(seqName())} tab plays the result when it’s ready.`);
   paintTabs(); pollSoon();
 }
 $('#reviseBtn').onclick = () => send('revise');
@@ -304,10 +360,11 @@ $('#renderBtn').onclick = async () => {
   const ok = await save({ kind: 'apply', sequence: S.id, at: new Date().toISOString(), summary: `Export ${seqName()} ${S.version || ''}: render exactly as it is in the planner and apply it to its Premiere sequence. No plan changes.` });
   if (!ok) return;
   const line = `/planner export ${seqName()}`;
-  let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-  $('#sendMsg').innerHTML = `Export for <b>${esc(seqName())} ${esc(S.version || '')}</b> saved ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'} Keep Premiere open with the Claude Apply panel.`;
-  status(copied ? 'Copied: ' + line : 'Saved');
-  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Paste the line in the Claude chat', state: 'waiting', since: new Date().toISOString() };
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
+  const mode = await dispatch(line, [seqName()]);
+  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  $('#sendMsg').innerHTML = `Export for <b>${esc(seqName())} ${esc(S.version || '')}</b> saved ✓ ` + sentText(mode, line, 'Keep Premiere open with the Claude Apply panel.');
+  status(mode === 'code' ? 'Claude Code is exporting ' + seqName() : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
 };
 
@@ -397,6 +454,12 @@ function seqText(s) {
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
 }
+$('#ccBadge').onclick = async () => {
+  await helperPing();
+  if (helper && helper.claude) { status(`Claude Code is connected (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`); return; }
+  let copied = false; try { await navigator.clipboard.writeText(SETUP_CMD); copied = true; } catch (e) {}
+  await ask((copied ? 'Setup command copied. ' : '') + 'To let Claude Code on this computer do your requests: open PowerShell (Start → type PowerShell), paste the command (right-click) and press Enter. Then reload this page.\n\n' + SETUP_CMD, 'OK', 'Close');
+};
 $('#applyAllBtn').onclick = async () => {
   if (!P) return; checkpoint(true);
   const list = P.sequences.filter(s => !s.mirror && (editCount(s) || s.review.approved));
@@ -404,10 +467,12 @@ $('#applyAllBtn').onclick = async () => {
   const summary = ['Apply all my changes (revise every tab listed; tabs marked APPROVED need no changes unless they have notes):'].concat(...list.map(seqText)).join('\n');
   const ok = await save({ kind: 'revise-all', sequence: 'all', sequences: list.map(s => s.id), at: new Date().toISOString(), summary });
   if (!ok) return;
-  const line = '/planner apply all changes'; let copied = false; try { await navigator.clipboard.writeText(line); copied = true; } catch (e) {}
-  $('#sendMsg').innerHTML = `All changes (${list.map(s => esc(s.name || s.id)).join(', ')}) saved in <b>${esc(fh.name)}</b> ✓ ${copied ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>'}`;
-  status(copied ? 'Copied: ' + line : 'Saved');
-  list.forEach(s => { const n = s.name || s.id.toUpperCase(); if (!s.review.approved || editCount(s)) jobs[n.toLowerCase()] = { seq: n, pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() }; });
+  const line = '/planner apply all changes';
+  const names = [];
+  list.forEach(s => { const n = s.name || s.id.toUpperCase(); if (!s.review.approved || editCount(s)) { names.push(n); jobs[n.toLowerCase()] = { seq: n, pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() }; } });
+  const mode = await dispatch(line, names);
+  $('#sendMsg').innerHTML = `All changes (${list.map(s => esc(s.name || s.id)).join(', ')}) saved in <b>${esc(fh.name)}</b> ✓ ` + sentText(mode, line);
+  status(mode === 'code' ? 'Claude Code is applying all changes' : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
 };
 
@@ -450,4 +515,4 @@ if ('launchQueue' in window) launchQueue.setConsumer(async p => { if (p.files &&
 if (!canFS) $('#fsNote').hidden = false;
 paintRecent();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-window.__planner = { load: d => { fh = null; return load(normalize(d)); }, mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t) };
+window.__planner = { load: d => { fh = null; return load(normalize(d)); }, mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t), dispatch: (l, n) => dispatch(l, n), _fh: h => { fh = h; } };
