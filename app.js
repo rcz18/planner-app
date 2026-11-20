@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=16';
-import { createTimeline, fmtTC } from './timeline.js?v=16';
-import { attachTools, wireMic } from './tools.js?v=16';
+import { createPreview } from './engine.js?v=16.1';
+import { createTimeline, fmtTC } from './timeline.js?v=16.1';
+import { attachTools, wireMic } from './tools.js?v=16.1';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -23,7 +23,7 @@ let pv = null, tl = null, tools = null, mediaURL = null;
 
 const sig = () => P ? JSON.stringify(P.sequences.filter(s => !s.mirror).map(s => [s.review, s.timeline])) : '';
 const dirty = () => P && sig() !== savedSig;
-function status(t) { $('#msg').textContent = t || ''; clearTimeout(status._t); if (t) status._t = setTimeout(() => $('#msg').textContent = '', 7000); }
+function status(t) { if (t) console.log('[Planner]', t); $('#msg').textContent = t || ''; clearTimeout(status._t); if (t) status._t = setTimeout(() => $('#msg').textContent = '', 7000); }
 function paintTitle() {
   const name = fh ? fh.name : (P ? (P.name || 'Untitled') + '.planner' : '');
   $('#fileName').innerHTML = P ? `${esc(name)} ${dirty() ? '<span class="dirty">● not saved</span>' : '<span class="ok">saved</span>'}` : '';
@@ -72,12 +72,28 @@ async function openPicker() {
   try { const [h] = await window.showOpenFilePicker({ id: 'planner', types: TYPES }); await openHandle(h); }
   catch (e) { if (e?.name !== 'AbortError') status('Could not open: ' + (e?.message || e)); }
 }
+const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' took too long')), ms))]);
 async function openHandle(h) {
-  if ((await h.queryPermission?.({ mode: 'readwrite' })) !== 'granted') await h.requestPermission?.({ mode: 'readwrite' });
-  const data = normalize(JSON.parse(await (await h.getFile()).text()));
-  if (!data) { status('That is not a planner project'); return; }
-  if (!(await confirmDiscard())) return;
-  fh = h; await addRecent(h); load(data);
+  const step = t => console.log('[Planner open]', t);
+  try {
+    step('permission'); let perm = 'granted';
+    try { perm = await withTimeout(h.queryPermission?.({ mode: 'readwrite' }) ?? Promise.resolve('granted'), 5000, 'Checking permission');
+      if (perm !== 'granted') perm = await h.requestPermission?.({ mode: 'readwrite' }); } catch (e) { step('permission: ' + e.message); }
+    step('reading ' + h.name);
+    const file = await withTimeout(h.getFile(), 20000, 'Reading the file');
+    const text = await withTimeout(file.text(), 20000, 'Reading the file');
+    let data; try { data = normalize(JSON.parse(text)); } catch (e) { throw new Error('The file is not a valid planner project (' + e.message + ')'); }
+    if (!data) throw new Error('That is not a planner project');
+    if (!(await confirmDiscard())) return;
+    step('loading');
+    fh = h;
+    try { await withTimeout(addRecent(h), 3000, 'Updating Recent'); } catch (e) { step('recent: ' + e.message); }
+    await load(data);
+    step('done');
+  } catch (e) {
+    console.error('[Planner open] failed', e);
+    if (await ask('Could not open the project: ' + (e?.message || e) + '\n\nTry the other way to open it?', 'Open another way', 'Close')) $('#fileInput').click();
+  }
 }
 async function confirmDiscard() { if (!dirty()) return true; return await ask('This project has changes that are not saved. Continue and lose them?', 'Discard changes', 'Cancel'); }
 async function addRecent(h) { const list = (await kvGet('recent')) || []; const rest = []; for (const r of list) { try { if (!(await r.h.isSameEntry(h))) rest.push(r); } catch (e) {} } rest.unshift({ h, name: h.name, at: Date.now() }); await kvSet('recent', rest.slice(0, 12)); }
@@ -509,7 +525,8 @@ document.addEventListener('keydown', e => { if (!(e.ctrlKey || e.metaKey)) retur
   if (k === 's') { e.preventDefault(); e.shiftKey ? saveAs() : save(); } else if (k === 'o') { e.preventDefault(); openPicker(); }
   else if (P && P.sequences.length > 1 && (e.key === 'PageDown' || e.key === 'PageUp')) { e.preventDefault(); const i = P.sequences.indexOf(S) + (e.key === 'PageDown' ? 1 : -1); if (P.sequences[i]) switchSeq(P.sequences[i].id); } }, true);
 window.addEventListener('beforeunload', e => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
-$('#fileInput').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = normalize(JSON.parse(await f.text())); if (!d) throw new Error('not a planner project'); fh = null; load(d); } catch (err) { status('Could not open: ' + err.message); } };
+$('#fileInput').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const d = normalize(JSON.parse(await f.text())); if (!d) throw new Error('not a planner project'); fh = null; await load(d); status('Opened ' + f.name + ' · use Save As… once to choose where it saves'); } catch (err) { console.error(err); await ask('Could not open: ' + err.message, 'OK', 'Close'); } };
+window.addEventListener('unhandledrejection', e => console.error('[Planner] error', e.reason));
 
 if ('launchQueue' in window) launchQueue.setConsumer(async p => { if (p.files && p.files[0]) { try { await openHandle(p.files[0]); } catch (e) { status('Could not open: ' + e.message); } } });
 if (!canFS) $('#fsNote').hidden = false;
