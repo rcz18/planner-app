@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=16.1';
-import { createTimeline, fmtTC } from './timeline.js?v=16.1';
-import { attachTools, wireMic } from './tools.js?v=16.1';
+import { createPreview } from './engine.js?v=16.5';
+import { createTimeline, fmtTC } from './timeline.js?v=16.5';
+import { attachTools, wireMic } from './tools.js?v=16.5';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -119,11 +119,11 @@ async function findMedia(seq, interactive) {
 }
 function showLink(seq, need) {
   const box = $('#linkMedia'); box.hidden = false;
-  box.innerHTML = `<div><b>${need === 'allow' ? 'Allow the project folder again' : 'Link the project folder'}</b>
+  box.innerHTML = `<div><b>${need === 'allow' ? 'Allow the project folder again' : need === 'slow' ? 'The video folder is not answering' : 'Link the project folder'}</b>${need === 'slow' ? '<p>Google Drive (J:) did not answer in time. Restart Google Drive, then reopen the project, or choose the video below.</p>' : ''}
     <p>Choose the <b>Planner App</b> folder (or its <b>media</b> folder). It holds <b>${esc(seq.media?.video || 'the video')}</b>${P.sequences.length > 1 ? ' (one time for all ' + P.sequences.length + ' sequences)' : ''}.</p>
-    <button type="button" class="btn primary" id="linkFolder">${need === 'allow' ? 'Allow' : 'Choose folder…'}</button> <button type="button" class="btn" id="linkFile">Choose just this video…</button></div>`;
+    <button type="button" class="btn primary" id="linkFolder">${need === 'allow' ? 'Allow' : need === 'slow' ? 'Try again' : 'Choose folder…'}</button> <button type="button" class="btn" id="linkFile">Choose just this video…</button></div>`;
   $('#linkFolder').onclick = async () => {
-    try { if (need !== 'allow') { const d = await window.showDirectoryPicker({ id: 'planner-folder', mode: 'read' }); await kvSet('folder:' + P.id, d); }
+    try { if (need !== 'allow' && need !== 'slow') { const d = await window.showDirectoryPicker({ id: 'planner-folder', mode: 'read' }); await kvSet('folder:' + P.id, d); }
       const f = await findMedia(seq, true); if (f instanceof File) mount(f); else if (need !== 'allow') status('Could not find ' + (seq.media?.video || 'the video') + ' in that folder. Pick the folder that has the “media” folder in it.');
     } catch (e) { if (e?.name !== 'AbortError') status('Could not link: ' + (e?.message || e)); } };
   $('#linkFile').onclick = async () => { try { const [h] = await window.showOpenFilePicker({ id: 'planner-media', types: VIDEO_TYPES }); await kvSet('media:' + P.id + ':' + seq.id, h); mount(await h.getFile()); } catch (e) {} };
@@ -153,7 +153,9 @@ async function switchSeq(id) {
   $('#projBadge').textContent = S.badge || S.version || ''; $('#projBadge').hidden = !(S.badge || S.version);
   $('#sendMsg').textContent = '';
   paintTabs(); paintBeats();
-  const f = await findMedia(S, false);
+  const mine = S; let f;
+  try { f = await withTimeout(findMedia(S, false), 8000, 'Finding the video'); } catch (e) { console.warn('[Planner] video:', e.message); f = { need: 'slow' }; }
+  if (S !== mine) return;
   if (f instanceof File) mount(f); else { mount(null); showLink(S, f.need); }
 }
 function mount(file) {
@@ -167,6 +169,22 @@ function mount(file) {
   tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc });
   $('#tools').hidden = !!S.mirror; if (S.mirror) $('#toolHint').textContent = 'View only: this tab shows P1–P8 back to back, with every change you make in those tabs.';
   pv.video.addEventListener('timeupdate', markBeat); pv.video.addEventListener('seeked', markBeat);
+  if (S.mirror) { const pb = $('#timeline .tlPlay'); if (pb) { const b = document.createElement('button'); b.type = 'button'; b.className = 'tlBtn tlRefresh'; b.textContent = '⟳ Refresh FULL'; b.title = 'Get the newest P tabs into FULL'; b.onclick = refreshFull; pb.after(b); } }
+}
+/* Refresh FULL: read the newest P tabs from the project file (unless you have unsaved edits in a tab), then rebuild FULL */
+async function refreshFull() {
+  if (!S || !S.mirror) return; const id = S.id, t = pv ? pv.time() : 0, wasDirty = dirty(); let n = 0;
+  status('Refreshing FULL…');
+  if (fh) { try { const f = await withTimeout(fh.getFile(), 15000, 'Reading the file'); const data = normalize(JSON.parse(await f.text()));
+      (data ? data.sequences : []).forEach(s => { if (s.mirror) return; const i = P.sequences.findIndex(x => x.id === s.id);
+        if (i < 0) { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences.push(s); n++; return; }
+        const x = P.sequences[i]; if (editCount(x) || JSON.stringify([x.version, orig[x.id]]) === JSON.stringify([s.version, s.beats])) return;
+        orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; delete last[s.id]; delete hist[s.id]; delete redo[s.id]; n++; });
+      lastFileStamp = f.lastModified;
+    } catch (e) { status('Could not read the project file: ' + e.message); } }
+  if (!wasDirty) savedSig = sig();
+  await switchSeq(id); paintTabs(); setTimeout(() => { try { tl && tl.seek(t); } catch (e) {} }, 300);
+  status(n ? `FULL refreshed ✓ ${n} tab${n > 1 ? 's' : ''} updated` : 'FULL refreshed ✓ already up to date');
 }
 function markBeat() { const t = pv.time(); document.querySelectorAll('.beat').forEach(c => c.classList.toggle('live', t >= +c.dataset.t0 && t < +c.dataset.t1)); }
 
@@ -377,8 +395,9 @@ $('#renderBtn').onclick = async () => {
   if (!ok) return;
   const line = `/planner export ${seqName()}`;
   jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
-  const mode = await dispatch(line, [seqName()]);
-  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  /* Export always goes to the Claude chat (renders there, not on this PC) */
+  let mode = 'type'; try { await navigator.clipboard.writeText(line); mode = 'copied'; } catch (e) {}
+  jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
   $('#sendMsg').innerHTML = `Export for <b>${esc(seqName())} ${esc(S.version || '')}</b> saved ✓ ` + sentText(mode, line, 'Keep Premiere open with the Claude Apply panel.');
   status(mode === 'code' ? 'Claude Code is exporting ' + seqName() : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
@@ -415,7 +434,28 @@ document.addEventListener('keydown', e => { if (!(e.ctrlKey || e.metaKey) || !P 
 document.addEventListener('change', e => { if (e.target.matches && e.target.matches('textarea,input[type=text]')) setTimeout(() => checkpoint(true), 0); });
 
 /* ---------- FULL tab: shows every P tab's edits live (view only) ---------- */
+/* FULL = the P tabs back to back: rebuild its beats from theirs, so every new version of a P tab shows in FULL too */
+const r3 = x => Math.round((+x + 1e-9) * 1000) / 1000;
+const tcShift = (str, off) => String(str).replace(/\b(\d+):(\d{2}(?:\.\d+)?)\b/g, (m, mm, ss) => { const t = +mm * 60 + +ss + off; return Math.floor(t / 60) + ':' + (t % 60).toFixed(1).padStart(4, '0'); });
+function shiftBeat(b, off, pre) {
+  const n = JSON.parse(JSON.stringify(b)); n.id = pre + b.id;
+  ['t0', 't1', 'hero'].forEach(k => { if (n[k] !== undefined && n[k] !== null && n[k] !== '') n[k] = r3(+n[k] + off); });
+  (n.els || []).forEach(e => { ['in', 'out'].forEach(k => { if (e[k] !== undefined && e[k] !== '') e[k] = r3(+e[k] + off); });
+    if (e.html) e.html = e.html.replace(/(data-(?:show|glow)=")([\d.]+)(")/g, (m, a, v, z) => a + (+v + off).toFixed(3) + z); });
+  if (Array.isArray(n.cam)) n.cam = n.cam.map(c => [r3(c[0] + off), ...c.slice(1)]);
+  if (Array.isArray(n.fx)) n.fx = n.fx.map(f => Array.isArray(f) ? [r3(+f[0] + off), r3(+f[1] + off), ...f.slice(2)] : f);
+  if (n.scene && typeof n.scene === 'object') ['t0', 't1'].forEach(k => { if (n.scene[k] !== undefined) n.scene[k] = r3(+n.scene[k] + off); });
+  if (Array.isArray(n.cues)) n.cues = n.cues.map(c => tcShift(c, off));
+  return n;
+}
+function deriveBeats(F) {
+  let off = 0; const beats = [];
+  for (const m of (F.mirror || [])) { const src = P.sequences.find(s => s.id === m.seq); if (!src) return null;
+    (orig[src.id] || src.beats || []).forEach(b => beats.push(shiftBeat(b, off, m.prefix || ''))); off += +src.duration || 0; }
+  return beats.length ? beats : null;
+}
 function deriveMirror(F) {
+  const nb = deriveBeats(F); if (nb) { F.beats = nb; orig[F.id] = JSON.parse(JSON.stringify(nb)); }
   const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.general = ''; F.timeline = {};
   (F.mirror || []).forEach(m => { const src = P.sequences.find(s => s.id === m.seq); if (!src) return; const off = +m.offset || 0, pre = m.prefix || '';
     Object.entries(src.review.moves || {}).forEach(([k, v]) => { R.moves[pre + k] = { ...v }; });
