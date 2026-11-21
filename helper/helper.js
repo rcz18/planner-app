@@ -5,7 +5,7 @@
 'use strict';
 const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn } = require('child_process');
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const DIR = __dirname;
 const CFG_FILE = path.join(DIR, 'config.json');
 let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch (e) {}
@@ -112,7 +112,8 @@ function next() {
   const prompt = `Use the planner skill.\nProject file: ${j.file}\nComputer: ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows PC' : process.platform}\nRequest: ${j.command}\n${j.request ? 'Request details for THIS job (the project file\'s `request` field may already be a newer queued request, so use these): ' + JSON.stringify(j.request).slice(0, 60000) + '\n' : ''}Do the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,' + (process.platform === 'win32' ? 'PowerShell,' : '') + 'WebFetch,WebSearch,TodoWrite,Skill,Task'];
-  if (cfg.model) args.push('--model', cfg.model);
+  let model = cfg.model; try { model = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')).model; } catch (e) {}   // read fresh, so a fixed config works without a restart
+  if (model && /^[A-Za-z0-9._:\[\]-]{1,80}$/.test(model)) args.push('--model', model);
   const logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
   Object.assign(j, { state: 'running', step: 'Starting Claude Code…', pct: 3, started: new Date().toISOString() });
   log('job', j.id, j.command, j.file);

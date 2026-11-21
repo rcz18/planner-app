@@ -39,12 +39,15 @@ OSA
 # --- 1. where things go (you choose) ---
 OLD_DIR=''; OLD_ROOT=''; OLD_MODEL=''
 if [ -f "$PLIST" ]; then
-  OLD_JS=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$PLIST" 2>/dev/null || true)
+  OLD_JS=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$PLIST" 2>/dev/null) || OLD_JS=''
   [ -n "$OLD_JS" ] && OLD_DIR=$(dirname "$OLD_JS")
 fi
 if [ -n "$OLD_DIR" ] && [ -f "$OLD_DIR/config.json" ]; then
-  OLD_ROOT=$(/usr/bin/plutil -extract root raw -o - "$OLD_DIR/config.json" 2>/dev/null || true)
-  OLD_MODEL=$(/usr/bin/plutil -extract model raw -o - "$OLD_DIR/config.json" 2>/dev/null || true)
+  # plutil prints its errors on stdout, so a missing key must give an empty value, not the error text
+  OLD_ROOT=$(/usr/bin/plutil -extract root raw -o - "$OLD_DIR/config.json" 2>/dev/null) || OLD_ROOT=''
+  OLD_MODEL=$(/usr/bin/plutil -extract model raw -o - "$OLD_DIR/config.json" 2>/dev/null) || OLD_MODEL=''
+  [ -d "$OLD_ROOT" ] || OLD_ROOT=''
+  printf '%s' "$OLD_MODEL" | grep -Eq '^[A-Za-z0-9._:\[\]-]{1,80}$' || OLD_MODEL=''
 fi
 DEF_DIR=${OLD_DIR:-"$HOME/Library/Application Support/Planner Helper"}
 
