@@ -241,3 +241,34 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .dBeat{font:600 10.5px "Roboto Mono",monospace;background:#33333c;border-radius:4px;padding:2px 5px;color:#ddd}
 .dLookRow{font-size:12px}.dLookRow select{margin-left:6px;background:#15151a;color:var(--text);border:1px solid #33333c;border-radius:6px;padding:4px 6px;max-width:260px}
 .dirRow .lookTag{color:var(--orange2)}
+/* ---------- 💡 Suggestions window ---------- */
+.ideasBtn{font-size:12.5px;padding:5px 10px;border-color:#5a4a2c}.ideasBtn:disabled{opacity:.4;cursor:default}
+.beatsH .grow{flex:1}.beatsH{gap:6px}
+.ideasWin{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center}
+.iwBox{width:min(1280px,94vw);height:min(860px,90vh);background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.iwBox header{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line)}.iwBox header b{font-size:15px}
+.iwBox header nav{display:flex;gap:4px;margin-left:8px}.iwX{margin-left:auto;padding:4px 10px}
+.iwTab{background:transparent;border:1px solid transparent;border-radius:7px;padding:5px 12px;cursor:pointer;color:var(--dim);font-size:13px}
+.iwTab[aria-pressed="true"]{background:var(--panel2);border-color:#3a3a43;color:var(--text);font-weight:600}
+.iwN{background:var(--orange);color:#111;border-radius:9px;padding:0 6px;font-size:11px;font-weight:700}.iwN:empty{display:none}
+.iwBody{flex:1;overflow:auto;padding:14px 16px}
+.iwGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.iwCard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.iwCard.on{border-color:var(--orange);box-shadow:0 0 0 1px var(--orange)}
+.iwPic{position:relative;aspect-ratio:16/9;background:#000;display:flex;align-items:center;justify-content:center}
+.iwPic img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}.iwPic .spin{font-size:12px;color:var(--dim)}
+.iwDots{position:absolute;left:8px;bottom:8px;display:flex;gap:4px}
+.iwDots button{background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:5px;font:600 10.5px "Roboto Mono",monospace;padding:2px 6px;cursor:pointer}
+.iwDots button.on{background:var(--orange);color:#111;border-color:var(--orange)}
+.iwTxt{padding:10px 12px 4px}.iwTxt h4{margin:0 0 6px;font:700 14px Roboto}.iwTxt p{margin:0 0 6px;font-size:12.5px;line-height:1.45;color:#cfcfd6}
+.iwId{display:inline-block;background:var(--orange);color:#111;border-radius:4px;padding:0 6px;margin-right:4px;font-size:12px}
+.iwSkill{color:var(--orange2)!important}.iwFrom{color:var(--dim)!important;font-size:11px!important}
+.iwBtns{display:flex;gap:6px;padding:4px 12px 12px;margin-top:auto}
+.iwLike.on{background:#3a3220;border-color:#facc15;color:#facc15}
+.iwBox footer{display:flex;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
+.iwBox footer input{flex:1;background:#15151a;border:1px solid #33333c;border-radius:7px;color:var(--text);padding:8px 10px;font:13px Roboto}
+.iwEmpty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--dim)}.iwEmpty b{color:var(--text);font-size:15px}
+.iwBusy{margin:0 0 10px;color:var(--orange2);font-size:12.5px}
+.iwBig{position:absolute;inset:0;background:rgba(0,0,0,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;z-index:2}
+.iwBig img{max-width:92%;max-height:84%;border-radius:8px}.iwBig p{color:#ddd;font-size:13px}
+@media (max-width:700px){.iwGrid{grid-template-columns:1fr}}

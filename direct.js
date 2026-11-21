@@ -3,7 +3,7 @@
    📸 screenshot the preview anywhere in the part (as many as you want) → comment + camera tags on each →
    double-click a screenshot to draw on it (pen, line, arrow, box, circle).
    💡 Looks: Claude writes a few looks for one beat; this app takes their screenshots itself (no renders, few tokens). */
-import { snapshot, wireMic } from './tools.js?v=16.8';
+import { snapshot, wireMic } from './tools.js?v=16.9';
 import { createPreview } from './engine.js?v=16.5';
 
 const W = 960, H = 540;
@@ -88,14 +88,9 @@ export function openDirect(ctx) {
     <label class="dLbl">Direction for the whole ${esc(name)}</label>
     <div class="noteRow"><textarea class="dNote" rows="3" placeholder="e.g. Start wide, push in to a close-up on “Deal!”, zoom out when the store builds. Keep the moves smooth and cinematic."></textarea><button type="button" class="mic dMic" title="Dictate">🎤</button></div>
     <div class="dShots"></div>
-    <div class="dLooksHead"><b>💡 Looks from Claude</b><span class="dim">Just screenshots, fast and light</span></div>
-    <div class="dLookRow"><label>Beat <select class="dLookBeat">${beats.map(b => `<option value="${esc(b.id)}">${esc(b.id)} · ${esc((b.title || '').slice(0, 40))}</option>`).join('')}</select></label></div>
-    <div class="noteRow"><input type="text" class="dAskNote" placeholder="What kind of looks? (optional, e.g. bolder, more 3D, minimal)"><button type="button" class="btn dAsk">Show me 3 looks</button></div>
-    <div class="dLooks"></div>
     <div class="dFoot"><button type="button" class="btn primary dSend">Send to Claude (Revise ${esc(name)})</button></div>`;
   const $p = sel => pane.querySelector(sel);
   const range = $p('.dRange'), tcEl = $p('.dTc'), bEl = $p('.dBeat'), note = $p('.dNote'), sel = $p('.dLookBeat');
-  sel.value = lookBeat;
   note.value = D.note || ''; wireMic($p('.dMic'), note);
   note.addEventListener('input', () => { D.note = note.value; ctx.onChange(); });
 
@@ -198,7 +193,6 @@ export function openDirect(ctx) {
   function closeAnnot() { if (!annot) return; annot.ov.remove(); annot.bar.remove(); window.removeEventListener('resize', annot.place); document.removeEventListener('keydown', annot.keys, true); annot = null; }
 
   /* ---------- Looks (for one beat) ---------- */
-  sel.onchange = () => { lookBeat = sel.value; paintLooks(); };
   async function paintLooks() {
     const box = $p('.dLooks'); if (!box) return; const bid = lookBeat, b = beats.find(x => x.id === bid);
     const list = (S.suggest || {})[bid] || [];
@@ -214,7 +208,7 @@ export function openDirect(ctx) {
     }
   }
   const drawOnLook = (l, pic, bid) => { const b = beats.find(x => x.id === bid); const sh = { id: uid(), t: +(l.t ?? (b.t0 + b.t1) / 2), beat: bid, cam: [], base: pic, img: pic, marks: [], note: '', look: l.id }; D.shots.push(sh); D.shots.sort((a, c) => a.t - c.t); ctx.onChange(); paintShots(); edit(sh); };
-  $p('.dLooks').onclick = async e => { const a = e.target.dataset.a; const fig = e.target.closest('figure'); if (!a || !fig) return; const bid = lookBeat;
+  if ($p('.dLooks')) $p('.dLooks').onclick = async e => { const a = e.target.dataset.a; const fig = e.target.closest('figure'); if (!a || !fig) return; const bid = lookBeat;
     const list = (S.suggest || {})[bid] || [], l = list[+fig.dataset.i]; if (!l) return;
     const pic = await lookShot(S, beats, bid, l, ctx.mediaURL).catch(() => '');
     if (a === 'use') { R.looks[bid] = R.looks[bid] === l.id ? '' : l.id; ctx.onChange(); paintLooks(); }
@@ -222,7 +216,7 @@ export function openDirect(ctx) {
     else if (a === 'view' && pic) edit(null, { view: true, src: pic, title: `${bid} · ${l.id} · ${l.title || ''}`,
       actions: `<button type="button" class="btn${R.looks[bid] === l.id ? ' primary' : ''}" data-a="vuse">${R.looks[bid] === l.id ? '✓ Using this' : 'Use this'}</button><button type="button" class="btn" data-a="vdraw">✏️ Draw on it</button>`,
       onAction: act => { closeAnnot(); if (act === 'vuse') { R.looks[bid] = R.looks[bid] === l.id ? '' : l.id; ctx.onChange(); paintLooks(); } if (act === 'vdraw') drawOnLook(l, pic, bid); } }); };
-  $p('.dAsk').onclick = async () => { const b = beats.find(x => x.id === lookBeat); if (!b) return; await ctx.onAskLooks(b, $p('.dAskNote').value.trim()); paintLooks(); };
+  if ($p('.dAsk')) $p('.dAsk').onclick = async () => { const b = beats.find(x => x.id === lookBeat); if (!b) return; await ctx.onAskLooks(b, $p('.dAskNote').value.trim()); paintLooks(); };
   $p('.dSend').onclick = () => { closeAnnot(); ctx.onSend(); };
   $p('.dBack').onclick = () => api.close();
   const keys = e => { const tg = e.target; if (annot || (tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return; if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -231,7 +225,7 @@ export function openDirect(ctx) {
 
   paintShots(); paintLooks();
   const api = {
-    edit, paintLooks, paintShots, setLookBeat(bid) { if (beats.some(b => b.id === bid)) { lookBeat = bid; sel.value = bid; paintLooks(); } },
+    edit, paintLooks, paintShots, 
     close() { closeAnnot(); document.removeEventListener('keydown', keys, true); ['timeupdate', 'seeked', 'pause', 'play'].forEach(e => pv.video.removeEventListener(e, paintT)); pane.innerHTML = ''; ctx.onClose && ctx.onClose(); }
   };
   return api;

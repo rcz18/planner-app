@@ -1,7 +1,8 @@
 import { createPreview } from './engine.js?v=16.5';
 import { createTimeline, fmtTC } from './timeline.js?v=16.5';
-import { attachTools, wireMic } from './tools.js?v=16.8';
-import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=16.8';
+import { attachTools, wireMic } from './tools.js?v=16.9';
+import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=16.9';
+import { openIdeas, ideaText } from './ideas.js?v=16.9';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -145,7 +146,7 @@ async function load(data) {
 }
 async function switchSeq(id) {
   const seq = P.sequences.find(s => s.id === id); if (!seq) return;
-  closeDirect();
+  closeDirect(); closeIdeas();
   if (pv) pv.video.pause();
   tl && tl.destroy(); tools && tools.destroy(); tl = tools = null;
   S = seq; P.current = id;
@@ -301,12 +302,15 @@ async function pullNewSequences() {
   const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
   const data = normalize(JSON.parse(await f.text())); if (!data) return;
   const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
-  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.suggest || null, s.mirror || null]);
+  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.suggest || null, s.ideas || null, s.mirror || null]);
   const done = s => { const j = jobs[(s.name || s.id).toLowerCase()]; return j && j.state === 'done'; };
   const updated = data.sequences.filter(s => { const x = P.sequences.find(y => y.id === s.id); return x && (done(s) || x.mirror || s.mirror || !editCount(x)) && key({ ...x, beats: orig[x.id] }) !== key(s); });
   updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; delete last[s.id]; delete hist[s.id]; delete redo[s.id]; });
-  const lk = pendingLook && updated.find(s => s.id === pendingLook.seq);
-  if (lk) { const want = pendingLook; pendingLook = null; savedSig = sig(); await switchSeq(lk.id); const b = orig[lk.id].find(x => x.id === want.beat);
+  const ik = pendingIdeas && updated.find(s => s.id === pendingIdeas);
+  if (ik) { pendingIdeas = null; savedSig = sig(); await switchSeq(ik.id); setTimeout(() => startIdeas(), 300);
+    const n = ik.name || ik.id.toUpperCase(); status(`4 suggestions for ${n} are ready ✓`); $('#sendMsg').innerHTML = `<b>4 suggestions for ${esc(n)}</b> are ready ✓`; }
+  const lk = !ik && pendingLook && updated.find(s => s.id === pendingLook.seq);
+  if (ik) {} else if (lk) { const want = pendingLook; pendingLook = null; savedSig = sig(); await switchSeq(lk.id); const b = orig[lk.id].find(x => x.id === want.beat);
     if (b) setTimeout(() => startDirect(b.id), 300);
     const n = lk.name || lk.id.toUpperCase(); status(`Looks for ${n} ${want.beat} are ready ✓`); $('#sendMsg').innerHTML = `<b>Looks for ${esc(n)} ${esc(want.beat)}</b> are ready ✓`; }
   else if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
@@ -362,6 +366,43 @@ function startDirect(lookBeat) {
     onClose: () => { $('.side').classList.remove('directing'); direct = null; paintBeats(); } });
 }
 $('#directBtn').onclick = () => startDirect();
+
+/* ---------- 💡 Suggestions from Claude: 4 looks for the whole part, Liked list for every project ---------- */
+let ideasWin = null, pendingIdeas = null, likesMem = null;
+kvGet('likes').then(v => { likesMem = Array.isArray(v) ? v : []; });
+function closeIdeas() { if (ideasWin) { const w = ideasWin; ideasWin = null; w.close(); } }
+function paintIdeasBtn() { const b = $('#ideasBtn'); if (!b || !S) return; const n = ((S.ideas || {}).list || []).length; b.disabled = !!S.mirror; b.textContent = '💡 Suggestions' + (n ? ' · ' + n : ''); }
+async function setLikes(list, item, added) {
+  likesMem = list; await kvSet('likes', list);
+  /* the project file keeps the names of what you liked, so Claude learns your taste */
+  P.likes ||= []; const k = item && item.key;
+  if (k) { P.likes = P.likes.filter(x => x.key !== k); if (added) P.likes.unshift({ key: k, seq: item.seq, id: item.id, title: item.title, skill: item.skill, read: item.read, at: item.at }); }
+  P.likes = P.likes.slice(0, 40);   // saved with the next Save / request
+}
+function startIdeas() {
+  if (!S || S.mirror) return; closeIdeas();
+  ideasWin = openIdeas({ P, S, beats: orig[S.id], mediaURL, status,
+    getLikes: () => likesMem || [], setLikes,
+    onGenerate: askIdeas, onApply: () => send('revise'), onChange: changedNow,
+    busy: () => { const j = jobs[seqName().toLowerCase()]; return !!(pendingIdeas === S.id && j && j.state !== 'done' && j.state !== 'error'); },
+    onClose: () => { ideasWin = null; paintIdeasBtn(); } });
+}
+$('#ideasBtn').onclick = () => startIdeas();
+async function askIdeas(note) {
+  if (!P || !S) return;
+  const prev = ((S.ideas || {}).list || []).map(x => x.title).filter(Boolean);
+  const ok = await save({ kind: 'ideas', sequence: S.id, at: new Date().toISOString(),
+    summary: `Make 4 new suggestions for the whole ${seqName()} (${(S.duration || 0).toFixed(2)} s), clearly different from each other, each with the skill that fits it best. Only write them into ideas; do not change the beats.${note ? ' What I want: ' + note : ''}${prev.length ? ' Not again: ' + prev.join(', ') + '.' : ''}${directText(S).length ? ' My direction for this part: ' + directText(S).join(' · ') : ''}` });
+  if (!ok) return;
+  pendingIdeas = S.id;
+  const line = `/planner ideas ${seqName()}`;
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Making 4 suggestions', state: 'waiting', since: new Date().toISOString() };
+  const mode = await dispatch(line, [seqName()]);
+  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  $('#sendMsg').innerHTML = `Suggestions for <b>${esc(seqName())}</b> asked ✓ ` + sentText(mode, line, 'They show in the Suggestions window when ready.');
+  status(mode === 'code' ? `Claude Code is making 4 suggestions for ${seqName()}` : mode === 'copied' ? 'Copied: ' + line : 'Saved');
+  paintTabs(); pollSoon();
+}
 /* screenshots go into "Planner App/direct/" (Claude reads them there); without the folder they stay inside the project file */
 async function saveImage(name, dataURL) {
   const dir = await projectDir('readwrite'); if (!dir) return null;
@@ -387,11 +428,10 @@ async function askLooks(b, note) {
 
 /* ---------- beats panel ---------- */
 function paintBeats() {
-  const R = S.review; paintDirectBtn();
+  const R = S.review; paintDirectBtn(); paintIdeasBtn();
   $('#beats').innerHTML = orig[S.id].map(b => `
     <article class="beat" data-id="${b.id}" data-t0="${b.t0}" data-t1="${b.t1}">
       <header><button type="button" class="playBeat" title="Play this beat">▶</button><span class="tc">${fmtTC(b.t0).slice(6)}</span><b>${esc(b.id)}</b><span class="kind ${esc(b.kind)}">${esc(b.kind || '')}</span></header>
-      ${((S.suggest || {})[b.id] || []).length ? `<div class="dirRow"><button type="button" class="btn sm lookTag" title="See Claude's looks for this beat">💡 ${(S.suggest[b.id]).length} looks${(S.review.looks || {})[b.id] ? ' · using ' + esc(S.review.looks[b.id]) : ''}</button></div>` : ''}
       <h4>${esc(b.title)}</h4>
       ${b.what ? `<p class="what">${esc(b.what)}</p>` : ''}
       <div class="picks" role="group" aria-label="Your pick">
@@ -409,7 +449,6 @@ function paintBeats() {
     paintPick();
     c.querySelector('.playBeat').onclick = () => pv && pv.playFrom(+c.dataset.t0, Math.min(S.duration, +c.dataset.t1 + 0.8));
     c.querySelector('h4').onclick = () => tl && tl.seek(+c.dataset.t0 + 0.02);
-    const lt = c.querySelector('.lookTag'); if (lt) lt.onclick = () => startDirect(id);
   });
 }
 document.addEventListener('input', e => { if (!S) return; const t = e.target;
@@ -423,6 +462,7 @@ function summary(kind) {
   const L = [`${kind === 'apply' ? `Apply ${seqName()} to sequence (this version is approved).` : `Revise ${seqName()} plan.`} (${S.version || ''}) My picks and notes:`];
   orig[S.id].forEach(b => L.push(`${b.id} (${b.title}): ${R.picks[b.id] || 'no pick'}${R.notes[b.id] ? ' · note: ' + R.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}${lookText(S, b.id)}`));
   directText(S).forEach(x => L.push(x));
+  if (ideaText(S)) L.push(ideaText(S));
   mediaText(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   return L.join('\n');
@@ -458,7 +498,7 @@ $('#renderBtn').onclick = async () => {
 
 
 /* ---------- edits: count, undo / redo (Ctrl+Z / Ctrl+Y) ---------- */
-function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + ((r.general || '').trim() ? 1 : 0); }
+function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0); }
 const hist = {}, redo = {}, last = {};
 const snap = s => JSON.stringify({ review: s.review, timeline: s.timeline });
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/.test(a.type || ''))); };
@@ -509,7 +549,7 @@ function deriveBeats(F) {
 }
 function deriveMirror(F) {
   const nb = deriveBeats(F); if (nb) { F.beats = nb; orig[F.id] = JSON.parse(JSON.stringify(nb)); }
-  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.direct = { note: '', shots: [] }; R.looks = {}; R.general = ''; F.timeline = {};
+  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.direct = { note: '', shots: [] }; R.looks = {}; R.idea = ''; R.general = ''; F.timeline = {};
   (F.mirror || []).forEach(m => { const src = P.sequences.find(s => s.id === m.seq); if (!src) return; const off = +m.offset || 0, pre = m.prefix || '';
     Object.entries(src.review.moves || {}).forEach(([k, v]) => { R.moves[pre + k] = { ...v }; });
     Object.entries(src.timeline || {}).forEach(([k, v]) => { F.timeline[pre + k] = { in: +(v.in + off).toFixed(3), out: +(v.out + off).toFixed(3), off: v.off || 0 }; });
@@ -561,6 +601,7 @@ function seqText(s) {
     { const lt = lookText(s, b.id); if (lt) bits.push(lt.slice(3)); }
     if (bits.length) L.push(`${b.id} (${b.title}): ${bits.join(' · ')}`); });
   directText(s).forEach(x => L.push(x));
+  if (ideaText(s)) L.push(ideaText(s));
   mediaText(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
