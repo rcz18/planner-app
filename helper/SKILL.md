@@ -17,7 +17,8 @@ The Planner app (https://rcz18.github.io/planner-app) saves a request into a `.p
 - Don't download or read the Planner app's source code to learn the format; this skill and the project's CLAUDE.md are enough. Read only what the request needs, then write the file.
 
 ## 1. Read
-1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "ideas" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
+1. **Requests can be queued.** If the prompt has "Request details for THIS job", that is your request; the file's top-level `request` may already be a newer one waiting in line. Do not touch the file's `request` unless its `at` equals yours (then set `handled: true`).
+   Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "ideas" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
    - **Save tokens:** the file can hold big pictures (`data:image/...` strings). Never Read the whole file raw. Print it with the pictures cut out, and write the pictures you need to files:
      `node -e "const f=process.argv[1],fs=require('fs'),p=require('path');let n=0;const o=JSON.stringify(JSON.parse(fs.readFileSync(f,'utf8')),(k,v)=>typeof v==='string'&&v.startsWith('data:image')?(fs.writeFileSync(p.join(require('os').tmpdir(),'planner-img-'+(++n)+'.jpg'),Buffer.from(v.split(',')[1],'base64')),'<picture planner-img-'+n+'.jpg in temp>'):v,1);console.log(o)" "<file>"`
      Then Read only the pictures that matter for this request.
@@ -60,7 +61,7 @@ Milestones: reading 10 → transcript 25 → designing 50 → checking 80 → sa
 Write ExtendScript to `Assets\AI render\_apply\<unique name>.job.json`. The Claude Apply panel in Premiere runs it and writes `<name>.done.json` (plus any result file your script writes). Wait for the done file (poll every 2 s, up to about 2 minutes). If nothing comes, Premiere or the panel is closed: leave the job there (it runs when the panel opens), set the status step to "Waiting for Premiere (Claude Apply)" and say so.
 
 ## 4. Save safely
-- Re-read the `.planner` file right before writing. Change only the tabs you worked on; keep every other tab, `mirror` fields and the user's other edits exactly.
+- Re-read the `.planner` file right before writing. Change only the tabs you worked on; keep every other tab, `mirror` fields and the user's other edits exactly. Always keep each tab's `history` (the app's saved earlier versions) and `ideas`, and the top-level `likes`, as they are.
 - For each tab you finished (revise / revise-all / apply): clear its `review` (keep `approved` if set; this also clears `direct` and `looks`) and remove its `timeline` edits. A **suggest** or **ideas** request clears nothing.
 - Set `request.handled = true` (keep the rest of the request) and `savedAt` to now.
 - Before writing, copy the old file to `Planner App\.backups\<name> <time>.planner`. Write JSON in one go.
