@@ -1,7 +1,7 @@
 import { createPreview } from './engine.js?v=16.5';
 import { createTimeline, fmtTC } from './timeline.js?v=16.5';
-import { attachTools, wireMic } from './tools.js?v=16.7';
-import { openDirect, directText, directCount } from './direct.js?v=16.7';
+import { attachTools, wireMic } from './tools.js?v=16.8';
+import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=16.8';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -40,7 +40,7 @@ function normalize(data) {
     const { format, id, name, client, ...seq } = data;
     data = { format: 'planner/2', id: id || 'project', name, client, sequences: [{ id: seq.seq || 'seq1', label: seq.label || name, ...seq }] };
   }
-  data.sequences.forEach(s => { s.review ||= {}; s.review.picks ||= {}; s.review.notes ||= {}; s.review.general ||= ''; s.review.moves ||= {}; s.review.cams ||= []; s.review.drawings ||= []; s.review.media ||= []; s.review.directs ||= {}; s.review.looks ||= {}; s.timeline ||= {}; });
+  data.sequences.forEach(s => { s.review ||= {}; s.review.picks ||= {}; s.review.notes ||= {}; s.review.general ||= ''; s.review.moves ||= {}; s.review.cams ||= []; s.review.drawings ||= []; s.review.media ||= []; directOf(s.review); s.review.looks ||= {}; s.timeline ||= {}; });
   return data;
 }
 
@@ -307,7 +307,7 @@ async function pullNewSequences() {
   updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; delete last[s.id]; delete hist[s.id]; delete redo[s.id]; });
   const lk = pendingLook && updated.find(s => s.id === pendingLook.seq);
   if (lk) { const want = pendingLook; pendingLook = null; savedSig = sig(); await switchSeq(lk.id); const b = orig[lk.id].find(x => x.id === want.beat);
-    if (b) setTimeout(() => startDirect(b), 300);
+    if (b) setTimeout(() => startDirect(b.id), 300);
     const n = lk.name || lk.id.toUpperCase(); status(`Looks for ${n} ${want.beat} are ready ✓`); $('#sendMsg').innerHTML = `<b>Looks for ${esc(n)} ${esc(want.beat)}</b> are ready ✓`; }
   else if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
     await switchSeq(u.id); setTimeout(() => pv && pv.playFrom(0), 400);
@@ -346,21 +346,22 @@ function newSeqDialog() {
 
 /* ---------- Direct: screenshots + drawings + comments for a whole beat, and Claude's looks ---------- */
 let direct = null, pendingLook = null;
-function dirBadge(bid) { const d = S && (S.review.directs || {})[bid]; const n = d ? (d.shots || []).length : 0; const lk = S && (S.review.looks || {})[bid];
-  return (n ? ` · ${n}` : '') + (d && (d.note || '').trim() && !n ? ' ✓' : '') + (lk ? ` · look ${esc(lk)}` : ''); }
+function paintDirectBtn() { const btn = $('#directBtn'); if (!btn || !S) return; const d = S.review.direct || {}, n = (d.shots || []).length;
+  btn.disabled = !!S.mirror; btn.textContent = `🎬 Direct ${S.name || S.id.toUpperCase()}` + (n ? ` · ${n}` : (d.note || '').trim() ? ' ✓' : ''); }
 function closeDirect() { if (direct) { const d = direct; direct = null; d.close(); } }
-function startDirect(b) {
-  if (!b || !S || S.mirror || !pv) return; closeDirect();
+function startDirect(lookBeat) {
+  if (!S || S.mirror || !pv) return; closeDirect();
   $('.side').classList.add('directing');
-  direct = openDirect({ S, beat: b, beats: orig[S.id], pv, tools, mediaURL, pane: $('#directPane'), monBox: $('.monitor'), monitor: $('#monitor'),
+  direct = openDirect({ S, beats: orig[S.id], lookBeat, pv, tools, mediaURL, pane: $('#directPane'), monBox: $('.monitor'), monitor: $('#monitor'),
     seek: t => tl ? tl.seek(t) : pv.seek(t), status,
     onChange: () => { changedNow(); },
     onSend: () => { closeDirect(); send('revise'); },
     onAskLooks: askLooks,
-    busy: () => { const j = jobs[seqName().toLowerCase()]; return !!(pendingLook && pendingLook.seq === S.id && pendingLook.beat === b.id && j && j.state !== 'done' && j.state !== 'error'); },
+    busy: bid => { const j = jobs[seqName().toLowerCase()]; return !!(pendingLook && pendingLook.seq === S.id && pendingLook.beat === bid && j && j.state !== 'done' && j.state !== 'error'); },
     saveImage, loadImage: rel => mediaSrc({ id: rel, file: rel }),
     onClose: () => { $('.side').classList.remove('directing'); direct = null; paintBeats(); } });
 }
+$('#directBtn').onclick = () => startDirect();
 /* screenshots go into "Planner App/direct/" (Claude reads them there); without the folder they stay inside the project file */
 async function saveImage(name, dataURL) {
   const dir = await projectDir('readwrite'); if (!dir) return null;
@@ -372,7 +373,7 @@ async function saveImage(name, dataURL) {
 async function askLooks(b, note) {
   if (!P || !S) return;
   const ok = await save({ kind: 'suggest', sequence: S.id, beat: b.id, at: new Date().toISOString(),
-    summary: `Suggest 3 different looks for ${seqName()} ${b.id} (“${b.title || ''}”, ${b.t0.toFixed(2)}–${b.t1.toFixed(2)} s). Only write them into suggest.${b.id}; do not change the beats.${note ? ' What I want: ' + note : ''}${directText(S, b.id)}` });
+    summary: `Suggest 3 different looks for ${seqName()} ${b.id} (“${b.title || ''}”, ${b.t0.toFixed(2)}–${b.t1.toFixed(2)} s). Only write them into suggest.${b.id}; do not change the beats.${note ? ' What I want: ' + note : ''}${directText(S).length ? ' My direction for this part: ' + directText(S).join(' · ') : ''}` });
   if (!ok) return;
   pendingLook = { seq: S.id, beat: b.id };
   const line = `/planner suggest ${seqName()} ${b.id}`;
@@ -386,11 +387,11 @@ async function askLooks(b, note) {
 
 /* ---------- beats panel ---------- */
 function paintBeats() {
-  const R = S.review;
+  const R = S.review; paintDirectBtn();
   $('#beats').innerHTML = orig[S.id].map(b => `
     <article class="beat" data-id="${b.id}" data-t0="${b.t0}" data-t1="${b.t1}">
       <header><button type="button" class="playBeat" title="Play this beat">▶</button><span class="tc">${fmtTC(b.t0).slice(6)}</span><b>${esc(b.id)}</b><span class="kind ${esc(b.kind)}">${esc(b.kind || '')}</span></header>
-      <div class="dirRow"><button type="button" class="btn sm dirBtn" title="Direct this beat: screenshots, drawings, comments and looks">🎬 Direct${dirBadge(b.id)}</button>${((S.suggest || {})[b.id] || []).length ? `<span class="lookTag" title="Claude made looks for this beat">💡 ${(S.suggest[b.id]).length} looks</span>` : ''}</div>
+      ${((S.suggest || {})[b.id] || []).length ? `<div class="dirRow"><button type="button" class="btn sm lookTag" title="See Claude's looks for this beat">💡 ${(S.suggest[b.id]).length} looks${(S.review.looks || {})[b.id] ? ' · using ' + esc(S.review.looks[b.id]) : ''}</button></div>` : ''}
       <h4>${esc(b.title)}</h4>
       ${b.what ? `<p class="what">${esc(b.what)}</p>` : ''}
       <div class="picks" role="group" aria-label="Your pick">
@@ -408,7 +409,7 @@ function paintBeats() {
     paintPick();
     c.querySelector('.playBeat').onclick = () => pv && pv.playFrom(+c.dataset.t0, Math.min(S.duration, +c.dataset.t1 + 0.8));
     c.querySelector('h4').onclick = () => tl && tl.seek(+c.dataset.t0 + 0.02);
-    c.querySelector('.dirBtn').onclick = () => startDirect(orig[S.id].find(x => x.id === id));
+    const lt = c.querySelector('.lookTag'); if (lt) lt.onclick = () => startDirect(id);
   });
 }
 document.addEventListener('input', e => { if (!S) return; const t = e.target;
@@ -420,7 +421,8 @@ const seqName = () => S.name || S.id.toUpperCase();
 function summary(kind) {
   const R = S.review;
   const L = [`${kind === 'apply' ? `Apply ${seqName()} to sequence (this version is approved).` : `Revise ${seqName()} plan.`} (${S.version || ''}) My picks and notes:`];
-  orig[S.id].forEach(b => L.push(`${b.id} (${b.title}): ${R.picks[b.id] || 'no pick'}${R.notes[b.id] ? ' · note: ' + R.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}${directText(S, b.id)}`));
+  orig[S.id].forEach(b => L.push(`${b.id} (${b.title}): ${R.picks[b.id] || 'no pick'}${R.notes[b.id] ? ' · note: ' + R.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}${lookText(S, b.id)}`));
+  directText(S).forEach(x => L.push(x));
   mediaText(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   return L.join('\n');
@@ -507,7 +509,7 @@ function deriveBeats(F) {
 }
 function deriveMirror(F) {
   const nb = deriveBeats(F); if (nb) { F.beats = nb; orig[F.id] = JSON.parse(JSON.stringify(nb)); }
-  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.directs = {}; R.looks = {}; R.general = ''; F.timeline = {};
+  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.direct = { note: '', shots: [] }; R.looks = {}; R.general = ''; F.timeline = {};
   (F.mirror || []).forEach(m => { const src = P.sequences.find(s => s.id === m.seq); if (!src) return; const off = +m.offset || 0, pre = m.prefix || '';
     Object.entries(src.review.moves || {}).forEach(([k, v]) => { R.moves[pre + k] = { ...v }; });
     Object.entries(src.timeline || {}).forEach(([k, v]) => { F.timeline[pre + k] = { in: +(v.in + off).toFixed(3), out: +(v.out + off).toFixed(3), off: v.off || 0 }; });
@@ -556,8 +558,9 @@ function seqText(s) {
     const tm = Object.entries(s.timeline || {}).filter(([k]) => k.startsWith(b.id + ':')); if (tm.length) bits.push('timeline (apply exactly): ' + tm.map(([k, v]) => `el#${k.split(':')[1]} in ${(+v.in).toFixed(2)} s, out ${(+v.out).toFixed(2)} s${Math.abs(v.off || 0) > .004 ? ' (whole clip moved)' : ''}`).join('; '));
     const ks = (r.cams || []).filter(k => k.t >= b.t0 && k.t < b.t1); if (ks.length) bits.push('my zoom/pan (use exactly): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; '));
     (r.drawings || []).filter(d => d.beat === b.id).forEach(d => bits.push(`drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`));
-    { const dt = directText(s, b.id); if (dt) bits.push(dt.slice(3)); }
+    { const lt = lookText(s, b.id); if (lt) bits.push(lt.slice(3)); }
     if (bits.length) L.push(`${b.id} (${b.title}): ${bits.join(' · ')}`); });
+  directText(s).forEach(x => L.push(x));
   mediaText(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
