@@ -13,6 +13,8 @@ The Planner app (https://rcz18.github.io/planner-app) saves a request into a `.p
 - Never save the Premiere project. The user presses Ctrl+S.
 - Never touch other sequences or the user's own review/timeline edits in the `.planner` file except the ones the request names.
 - Do not ask questions; there is nobody to answer. Take the most reasonable reading and say which one at the end.
+- **Be fast. No self-check renders.** For new / revise / revise-all / suggest, do NOT render, screenshot or preview your work (no headless Chrome, Playwright, ffmpeg frames, contact sheets). The user sees the result live in the Planner app the moment you save. Only **apply / export** renders video.
+- Don't download or read the Planner app's source code to learn the format; this skill and the project's CLAUDE.md are enough. Read only what the request needs, then write the file.
 
 ## 1. Read
 1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
