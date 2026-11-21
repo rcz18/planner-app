@@ -1,5 +1,5 @@
 /* Offline support. Always asks the network first (skipping the browser cache) so a new version shows up on the next reload. */
-const C = 'planner-v16.5';
+const C = 'planner-v16.7';
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

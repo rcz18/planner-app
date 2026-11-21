@@ -162,45 +162,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
         e.target.disabled = true; e.target.textContent = 'Saving…';
         shotOf(sk).then(shot => { R.drawings.push({ t, beat: b.id, note, png, shot }); changed(); paintDrawings(); setMode(''); }); } };
   }
-  /* a picture of the exact shot (video + graphics + your drawing), so Claude sees what you saw */
-  let fontCSS = null;
-  async function fonts() {
-    if (fontCSS !== null) return fontCSS;
-    try { const href = [...document.querySelectorAll('link[rel=stylesheet]')].map(l => l.href).find(h => h.includes('fonts.googleapis.com'));
-      let css = href ? await (await fetch(href)).text() : '';
-      const urls = [...new Set(css.match(/https:[^)'"]+\.woff2/g) || [])];
-      const data = await Promise.all(urls.map(async u => { const b = await (await fetch(u)).blob(); return await new Promise(r => { const fr2 = new FileReader(); fr2.onload = () => r(fr2.result); fr2.readAsDataURL(b); }); }));
-      urls.forEach((u, i) => { css = css.split(u).join(data[i]); }); fontCSS = css; } catch (e) { fontCSS = ''; }
-    return fontCSS;
-  }
-  async function shotOf(sketch) {
-    const W = 960, H = 540, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
-    g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-    const rect = fr.getBoundingClientRect();
-    try {
-      const clone = fr.cloneNode(true), O = [fr, ...fr.querySelectorAll('*')], C = [clone, ...clone.querySelectorAll('*')];
-      const P = ['transform', 'translate', 'scale', 'rotate', 'opacity', 'filter', 'clip-path', 'transform-origin', 'visibility', 'left', 'top', 'width', 'height'];
-      O.forEach((o, i) => { const k = C[i]; if (!k || !k.style) return; const cs = getComputedStyle(o);
-        P.forEach(p => k.style.setProperty(p, cs.getPropertyValue(p), 'important'));
-        k.style.setProperty('animation', 'none', 'important'); k.style.setProperty('transition', 'none', 'important');
-        if (o.tagName === 'VIDEO' || o.tagName === 'CANVAS') { let url = '';
-          try { if (o.tagName === 'VIDEO') { const vc = document.createElement('canvas'); vc.width = o.videoWidth || 1280; vc.height = o.videoHeight || 720; vc.getContext('2d').drawImage(o, 0, 0, vc.width, vc.height); url = vc.toDataURL('image/jpeg', 0.85); } else url = o.toDataURL('image/png'); } catch (e) {}
-          const im = document.createElement('img'); im.setAttribute('src', url); im.setAttribute('style', k.getAttribute('style') || ''); im.className = o.className;
-          ['position', 'inset', 'object-fit', 'z-index', 'border-radius', 'box-shadow', 'display'].forEach(p => im.style.setProperty(p, cs.getPropertyValue(p), 'important'));
-          if (!url) im.style.setProperty('display', 'none', 'important'); k.replaceWith(im); } });
-      clone.querySelectorAll('.pa-box,.pa-media .pa-h').forEach(x => x.remove()); clone.querySelectorAll('.pa-sel').forEach(x => x.classList.remove('pa-sel'));
-      clone.style.setProperty('width', rect.width + 'px', 'important'); clone.style.setProperty('height', rect.height + 'px', 'important');
-      const css = [...root.querySelectorAll('style')].map(x => x.textContent).join('\n').replace(/:host\b/g, '.shotRoot');
-      const wrap = document.createElement('div'); wrap.className = 'shotRoot'; wrap.setAttribute('style', `width:${rect.width}px;height:${rect.height}px;transform:scale(${W / rect.width});transform-origin:0 0;position:relative;overflow:hidden`);
-      const sty = document.createElement('style'); sty.textContent = (await fonts()) + '\n' + css; wrap.appendChild(sty); wrap.appendChild(clone);
-      const xml = new XMLSerializer().serializeToString(wrap);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject x="0" y="0" width="${W}" height="${H}">${xml}</foreignObject></svg>`;
-      const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode(); g.drawImage(img, 0, 0, W, H);
-      c.toDataURL('image/jpeg', 0.5);   // throws if the picture could not be used
-    } catch (e) { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); try { g.drawImage(v, 0, 0, W, H); } catch (e2) {} }
-    g.drawImage(sketch, 0, 0, W, H);
-    try { return c.toDataURL('image/jpeg', 0.82); } catch (e) { return ''; }
-  }
+  const shotOf = sk => snapshot(fr, root, v, sk);
   function closeDraw() { canvas && canvas.remove(); dbar && dbar.remove(); canvas = dbar = null; }
   function paintDrawings() {
     document.querySelectorAll('.beat').forEach(card => { const id = card.dataset.id, list = R.drawings.map((d, i) => [d, i]).filter(([d]) => d.beat === id);
@@ -226,7 +188,47 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     R.drawings.filter(d => d.beat === bid).forEach(d => { s += ` · drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`; });
     return s; };
   renderMedia();
-  return { text, sync() { pv.applyMoves(); renderMedia(); if (sel && !elOf(sel)) sel = null; hint._sel = null; placeBox(); paintHint(); pv.render(pv.time()); }, destroy() { mAlive = false; mediaEls.forEach(d => d.remove()); closeDraw(); box.remove(); window.removeEventListener('resize', placeBox); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
+  return { text, shot() { v.pause(); return snapshot(fr, root, v); }, idle() { if (mode) setMode(mode); }, sync() { pv.applyMoves(); renderMedia(); if (sel && !elOf(sel)) sel = null; hint._sel = null; placeBox(); paintHint(); pv.render(pv.time()); }, destroy() { mAlive = false; mediaEls.forEach(d => d.remove()); closeDraw(); box.remove(); window.removeEventListener('resize', placeBox); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
+}
+
+/* a picture of the exact shot (video + graphics + your drawing), so Claude sees what you saw */
+let fontCSS = null;
+async function fonts() {
+  if (fontCSS !== null) return fontCSS;
+  try { const href = [...document.querySelectorAll('link[rel=stylesheet]')].map(l => l.href).find(h => h.includes('fonts.googleapis.com'));
+    let css = href ? await (await fetch(href)).text() : '';
+    const urls = [...new Set(css.match(/https:[^)'"]+\.woff2/g) || [])];
+    const data = await Promise.all(urls.map(async u => { const b = await (await fetch(u)).blob(); return await new Promise(r => { const fr2 = new FileReader(); fr2.onload = () => r(fr2.result); fr2.readAsDataURL(b); }); }));
+    urls.forEach((u, i) => { css = css.split(u).join(data[i]); }); fontCSS = css; } catch (e) { fontCSS = ''; }
+  return fontCSS;
+}
+export async function snapshot(fr, root, v, sketch) {
+  const W = 960, H = 540, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const rect = fr.getBoundingClientRect();
+  try {
+    const clone = fr.cloneNode(true), O = [fr, ...fr.querySelectorAll('*')], C = [clone, ...clone.querySelectorAll('*')];
+    const P = ['transform', 'translate', 'scale', 'rotate', 'opacity', 'filter', 'clip-path', 'transform-origin', 'visibility', 'left', 'top', 'width', 'height'];
+    O.forEach((o, i) => { const k = C[i]; if (!k || !k.style) return; const cs = getComputedStyle(o);
+      P.forEach(p => k.style.setProperty(p, cs.getPropertyValue(p), 'important'));
+      k.style.setProperty('animation', 'none', 'important'); k.style.setProperty('transition', 'none', 'important');
+      if (o.tagName === 'VIDEO' || o.tagName === 'CANVAS') { let url = '';
+        try { if (o.tagName === 'VIDEO') { const vc = document.createElement('canvas'); vc.width = o.videoWidth || 1280; vc.height = o.videoHeight || 720; vc.getContext('2d').drawImage(o, 0, 0, vc.width, vc.height); url = vc.toDataURL('image/jpeg', 0.85); } else url = o.toDataURL('image/png'); } catch (e) {}
+        const im = document.createElement('img'); im.setAttribute('src', url); im.setAttribute('style', k.getAttribute('style') || ''); im.className = o.className;
+        ['position', 'inset', 'object-fit', 'z-index', 'border-radius', 'box-shadow', 'display'].forEach(p => im.style.setProperty(p, cs.getPropertyValue(p), 'important'));
+        if (!url) im.style.setProperty('display', 'none', 'important'); k.replaceWith(im); } });
+    clone.querySelectorAll('.pa-box,.pa-media .pa-h').forEach(x => x.remove()); clone.querySelectorAll('.pa-sel').forEach(x => x.classList.remove('pa-sel'));
+    clone.style.setProperty('width', rect.width + 'px', 'important'); clone.style.setProperty('height', rect.height + 'px', 'important');
+    const css = [...root.querySelectorAll('style')].map(x => x.textContent).join('\n').replace(/:host\b/g, '.shotRoot');
+    const wrap = document.createElement('div'); wrap.className = 'shotRoot'; wrap.setAttribute('style', `width:${rect.width}px;height:${rect.height}px;transform:scale(${W / rect.width});transform-origin:0 0;position:relative;overflow:hidden`);
+    const sty = document.createElement('style'); sty.textContent = (await fonts()) + '\n' + css; wrap.appendChild(sty); wrap.appendChild(clone);
+    const xml = new XMLSerializer().serializeToString(wrap);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject x="0" y="0" width="${W}" height="${H}">${xml}</foreignObject></svg>`;
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode(); g.drawImage(img, 0, 0, W, H);
+    c.toDataURL('image/jpeg', 0.5);   // throws if the picture could not be used
+  } catch (e) { g.fillStyle = '#000'; g.fillRect(0, 0, W, H); try { g.drawImage(v, 0, 0, W, H); } catch (e2) {} }
+  if (sketch) g.drawImage(sketch, 0, 0, W, H);
+  try { return c.toDataURL('image/jpeg', 0.82); } catch (e) { return ''; }
 }
 
 /* ---------- Dictate (Chrome speech recognition) ---------- */

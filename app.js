@@ -1,6 +1,7 @@
 import { createPreview } from './engine.js?v=16.5';
 import { createTimeline, fmtTC } from './timeline.js?v=16.5';
-import { attachTools, wireMic } from './tools.js?v=16.5';
+import { attachTools, wireMic } from './tools.js?v=16.7';
+import { openDirect, directText, directCount } from './direct.js?v=16.7';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -39,7 +40,7 @@ function normalize(data) {
     const { format, id, name, client, ...seq } = data;
     data = { format: 'planner/2', id: id || 'project', name, client, sequences: [{ id: seq.seq || 'seq1', label: seq.label || name, ...seq }] };
   }
-  data.sequences.forEach(s => { s.review ||= {}; s.review.picks ||= {}; s.review.notes ||= {}; s.review.general ||= ''; s.review.moves ||= {}; s.review.cams ||= []; s.review.drawings ||= []; s.review.media ||= []; s.timeline ||= {}; });
+  data.sequences.forEach(s => { s.review ||= {}; s.review.picks ||= {}; s.review.notes ||= {}; s.review.general ||= ''; s.review.moves ||= {}; s.review.cams ||= []; s.review.drawings ||= []; s.review.media ||= []; s.review.directs ||= {}; s.review.looks ||= {}; s.timeline ||= {}; });
   return data;
 }
 
@@ -144,6 +145,7 @@ async function load(data) {
 }
 async function switchSeq(id) {
   const seq = P.sequences.find(s => s.id === id); if (!seq) return;
+  closeDirect();
   if (pv) pv.video.pause();
   tl && tl.destroy(); tools && tools.destroy(); tl = tools = null;
   S = seq; P.current = id;
@@ -159,6 +161,7 @@ async function switchSeq(id) {
   if (f instanceof File) mount(f); else { mount(null); showLink(S, f.need); }
 }
 function mount(file) {
+  closeDirect();
   if (file) $('#linkMedia').hidden = true;
   if (mediaURL) URL.revokeObjectURL(mediaURL);
   mediaURL = file ? URL.createObjectURL(file) : '';
@@ -216,9 +219,11 @@ function paintJobBar() {
 $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
 
 
-/* ---------- Claude Code on this computer (Planner Helper: helper/setup.ps1) ---------- */
+/* ---------- Claude Code on this computer (Planner Helper: helper/setup.ps1 on Windows, helper/setup-mac.sh on Mac) ---------- */
 const HELPER = 'http://127.0.0.1:47321';
-const SETUP_CMD = 'irm https://raw.githubusercontent.com/rcz18/planner-app/main/helper/setup.ps1 | iex';
+const IS_MAC = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+const SETUP_CMD = IS_MAC ? 'curl -fsSL https://raw.githubusercontent.com/rcz18/planner-app/main/helper/setup-mac.sh | bash'
+  : 'irm https://raw.githubusercontent.com/rcz18/planner-app/main/helper/setup.ps1 | iex';
 let helper = null, helperJobT = null;
 const hfetch = (p, o = {}) => fetch(HELPER + p, { cache: 'no-store', targetAddressSpace: 'loopback', ...o });
 async function helperPing() {
@@ -246,7 +251,7 @@ async function dispatch(line, names) {
 }
 function sentText(mode, line, extra = '') {
   if (mode === 'code') return `Claude Code is on it ✓ ${extra} Watch the progress bar at the top; the tab updates by itself.`;
-  return (mode === 'copied' ? 'Now paste in the Claude chat (Ctrl+V) and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra;
+  return (mode === 'copied' ? 'Now paste in the Claude chat (' + (IS_MAC ? 'Cmd+V' : 'Ctrl+V') + ') and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra;
 }
 function watchHelperJob(names) {
   clearTimeout(helperJobT);
@@ -296,11 +301,15 @@ async function pullNewSequences() {
   const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
   const data = normalize(JSON.parse(await f.text())); if (!data) return;
   const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
-  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.mirror || null]);
+  const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.suggest || null, s.mirror || null]);
   const done = s => { const j = jobs[(s.name || s.id).toLowerCase()]; return j && j.state === 'done'; };
   const updated = data.sequences.filter(s => { const x = P.sequences.find(y => y.id === s.id); return x && (done(s) || x.mirror || s.mirror || !editCount(x)) && key({ ...x, beats: orig[x.id] }) !== key(s); });
   updated.forEach(s => { const i = P.sequences.findIndex(x => x.id === s.id); orig[s.id] = JSON.parse(JSON.stringify(s.beats)); P.sequences[i] = s; delete last[s.id]; delete hist[s.id]; delete redo[s.id]; });
-  if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
+  const lk = pendingLook && updated.find(s => s.id === pendingLook.seq);
+  if (lk) { const want = pendingLook; pendingLook = null; savedSig = sig(); await switchSeq(lk.id); const b = orig[lk.id].find(x => x.id === want.beat);
+    if (b) setTimeout(() => startDirect(b), 300);
+    const n = lk.name || lk.id.toUpperCase(); status(`Looks for ${n} ${want.beat} are ready ✓`); $('#sendMsg').innerHTML = `<b>Looks for ${esc(n)} ${esc(want.beat)}</b> are ready ✓`; }
+  else if (updated.length) { savedSig = sig(); const u = updated.find(s => s.id === S.id) || updated[0];
     await switchSeq(u.id); setTimeout(() => pv && pv.playFrom(0), 400);
     const n = u.name || u.id.toUpperCase(); status(`${n} ${u.version || ''} is ready ✓`);
     $('#sendMsg').innerHTML = `<b>${esc(n)} ${esc(u.version || '')}</b> is ready ✓ playing it now.`; }
@@ -335,12 +344,53 @@ function newSeqDialog() {
   d.showModal();
 }
 
+/* ---------- Direct: screenshots + drawings + comments for a whole beat, and Claude's looks ---------- */
+let direct = null, pendingLook = null;
+function dirBadge(bid) { const d = S && (S.review.directs || {})[bid]; const n = d ? (d.shots || []).length : 0; const lk = S && (S.review.looks || {})[bid];
+  return (n ? ` · ${n}` : '') + (d && (d.note || '').trim() && !n ? ' ✓' : '') + (lk ? ` · look ${esc(lk)}` : ''); }
+function closeDirect() { if (direct) { const d = direct; direct = null; d.close(); } }
+function startDirect(b) {
+  if (!b || !S || S.mirror || !pv) return; closeDirect();
+  $('.side').classList.add('directing');
+  direct = openDirect({ S, beat: b, beats: orig[S.id], pv, tools, mediaURL, pane: $('#directPane'), monBox: $('.monitor'), monitor: $('#monitor'),
+    seek: t => tl ? tl.seek(t) : pv.seek(t), status,
+    onChange: () => { changedNow(); },
+    onSend: () => { closeDirect(); send('revise'); },
+    onAskLooks: askLooks,
+    busy: () => { const j = jobs[seqName().toLowerCase()]; return !!(pendingLook && pendingLook.seq === S.id && pendingLook.beat === b.id && j && j.state !== 'done' && j.state !== 'error'); },
+    saveImage, loadImage: rel => mediaSrc({ id: rel, file: rel }),
+    onClose: () => { $('.side').classList.remove('directing'); direct = null; paintBeats(); } });
+}
+/* screenshots go into "Planner App/direct/" (Claude reads them there); without the folder they stay inside the project file */
+async function saveImage(name, dataURL) {
+  const dir = await projectDir('readwrite'); if (!dir) return null;
+  try { let base = dir, pre = ''; try { base = await dir.getDirectoryHandle('Planner App'); pre = 'Planner App/'; } catch (e) {}
+    const sub = await base.getDirectoryHandle('direct', { create: true }); const fname = name.replace(/[\\/:*?"<>|]+/g, '-');
+    const blob = await (await fetch(dataURL)).blob(); const w = await (await sub.getFileHandle(fname, { create: true })).createWritable(); await w.write(blob); await w.close();
+    const rel = pre + 'direct/' + fname; mediaCache.set(rel, URL.createObjectURL(blob)); return rel; } catch (e) { return null; }
+}
+async function askLooks(b, note) {
+  if (!P || !S) return;
+  const ok = await save({ kind: 'suggest', sequence: S.id, beat: b.id, at: new Date().toISOString(),
+    summary: `Suggest 3 different looks for ${seqName()} ${b.id} (“${b.title || ''}”, ${b.t0.toFixed(2)}–${b.t1.toFixed(2)} s). Only write them into suggest.${b.id}; do not change the beats.${note ? ' What I want: ' + note : ''}${directText(S, b.id)}` });
+  if (!ok) return;
+  pendingLook = { seq: S.id, beat: b.id };
+  const line = `/planner suggest ${seqName()} ${b.id}`;
+  jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Making looks for ' + b.id, state: 'waiting', since: new Date().toISOString() };
+  const mode = await dispatch(line, [seqName()]);
+  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  $('#sendMsg').innerHTML = `Looks for <b>${esc(seqName())} ${esc(b.id)}</b> asked ✓ ` + sentText(mode, line, 'They show in the Direct panel when ready.');
+  status(mode === 'code' ? `Claude Code is making looks for ${b.id}` : mode === 'copied' ? 'Copied: ' + line : 'Saved');
+  paintTabs(); pollSoon();
+}
+
 /* ---------- beats panel ---------- */
 function paintBeats() {
   const R = S.review;
   $('#beats').innerHTML = orig[S.id].map(b => `
     <article class="beat" data-id="${b.id}" data-t0="${b.t0}" data-t1="${b.t1}">
       <header><button type="button" class="playBeat" title="Play this beat">▶</button><span class="tc">${fmtTC(b.t0).slice(6)}</span><b>${esc(b.id)}</b><span class="kind ${esc(b.kind)}">${esc(b.kind || '')}</span></header>
+      <div class="dirRow"><button type="button" class="btn sm dirBtn" title="Direct this beat: screenshots, drawings, comments and looks">🎬 Direct${dirBadge(b.id)}</button>${((S.suggest || {})[b.id] || []).length ? `<span class="lookTag" title="Claude made looks for this beat">💡 ${(S.suggest[b.id]).length} looks</span>` : ''}</div>
       <h4>${esc(b.title)}</h4>
       ${b.what ? `<p class="what">${esc(b.what)}</p>` : ''}
       <div class="picks" role="group" aria-label="Your pick">
@@ -358,6 +408,7 @@ function paintBeats() {
     paintPick();
     c.querySelector('.playBeat').onclick = () => pv && pv.playFrom(+c.dataset.t0, Math.min(S.duration, +c.dataset.t1 + 0.8));
     c.querySelector('h4').onclick = () => tl && tl.seek(+c.dataset.t0 + 0.02);
+    c.querySelector('.dirBtn').onclick = () => startDirect(orig[S.id].find(x => x.id === id));
   });
 }
 document.addEventListener('input', e => { if (!S) return; const t = e.target;
@@ -369,7 +420,7 @@ const seqName = () => S.name || S.id.toUpperCase();
 function summary(kind) {
   const R = S.review;
   const L = [`${kind === 'apply' ? `Apply ${seqName()} to sequence (this version is approved).` : `Revise ${seqName()} plan.`} (${S.version || ''}) My picks and notes:`];
-  orig[S.id].forEach(b => L.push(`${b.id} (${b.title}): ${R.picks[b.id] || 'no pick'}${R.notes[b.id] ? ' · note: ' + R.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}`));
+  orig[S.id].forEach(b => L.push(`${b.id} (${b.title}): ${R.picks[b.id] || 'no pick'}${R.notes[b.id] ? ' · note: ' + R.notes[b.id].trim() : ''}${tl ? tl.changesText(b.id) : ''}${tools ? tools.text(b.id) : ''}${directText(S, b.id)}`));
   mediaText(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   return L.join('\n');
@@ -405,7 +456,7 @@ $('#renderBtn').onclick = async () => {
 
 
 /* ---------- edits: count, undo / redo (Ctrl+Z / Ctrl+Y) ---------- */
-function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + ((r.general || '').trim() ? 1 : 0); }
+function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + ((r.general || '').trim() ? 1 : 0); }
 const hist = {}, redo = {}, last = {};
 const snap = s => JSON.stringify({ review: s.review, timeline: s.timeline });
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/.test(a.type || ''))); };
@@ -456,7 +507,7 @@ function deriveBeats(F) {
 }
 function deriveMirror(F) {
   const nb = deriveBeats(F); if (nb) { F.beats = nb; orig[F.id] = JSON.parse(JSON.stringify(nb)); }
-  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.general = ''; F.timeline = {};
+  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.directs = {}; R.looks = {}; R.general = ''; F.timeline = {};
   (F.mirror || []).forEach(m => { const src = P.sequences.find(s => s.id === m.seq); if (!src) return; const off = +m.offset || 0, pre = m.prefix || '';
     Object.entries(src.review.moves || {}).forEach(([k, v]) => { R.moves[pre + k] = { ...v }; });
     Object.entries(src.timeline || {}).forEach(([k, v]) => { F.timeline[pre + k] = { in: +(v.in + off).toFixed(3), out: +(v.out + off).toFixed(3), off: v.off || 0 }; });
@@ -505,6 +556,7 @@ function seqText(s) {
     const tm = Object.entries(s.timeline || {}).filter(([k]) => k.startsWith(b.id + ':')); if (tm.length) bits.push('timeline (apply exactly): ' + tm.map(([k, v]) => `el#${k.split(':')[1]} in ${(+v.in).toFixed(2)} s, out ${(+v.out).toFixed(2)} s${Math.abs(v.off || 0) > .004 ? ' (whole clip moved)' : ''}`).join('; '));
     const ks = (r.cams || []).filter(k => k.t >= b.t0 && k.t < b.t1); if (ks.length) bits.push('my zoom/pan (use exactly): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; '));
     (r.drawings || []).filter(d => d.beat === b.id).forEach(d => bits.push(`drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`));
+    { const dt = directText(s, b.id); if (dt) bits.push(dt.slice(3)); }
     if (bits.length) L.push(`${b.id} (${b.title}): ${bits.join(' · ')}`); });
   mediaText(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
@@ -514,7 +566,7 @@ $('#ccBadge').onclick = async () => {
   await helperPing();
   if (helper && helper.claude) { status(`Claude Code is connected (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`); return; }
   let copied = false; try { await navigator.clipboard.writeText(SETUP_CMD); copied = true; } catch (e) {}
-  await ask((copied ? 'Setup command copied. ' : '') + 'To let Claude Code on this computer do your requests: open PowerShell (Start → type PowerShell), paste the command (right-click) and press Enter. Then reload this page.\n\n' + SETUP_CMD, 'OK', 'Close');
+  await ask((copied ? 'Setup command copied. ' : '') + 'To let Claude Code on this computer do your requests: ' + (IS_MAC ? 'open Terminal (Cmd+Space → type Terminal), paste the command (Cmd+V)' : 'open PowerShell (Start → type PowerShell), paste the command (right-click)') + ' and press Enter. Then reload this page.\n\n' + SETUP_CMD, 'OK', 'Close');
 };
 $('#applyAllBtn').onclick = async () => {
   if (!P) return; checkpoint(true);
@@ -572,4 +624,4 @@ if ('launchQueue' in window) launchQueue.setConsumer(async p => { if (p.files &&
 if (!canFS) $('#fsNote').hidden = false;
 paintRecent();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
-window.__planner = { load: d => { fh = null; return load(normalize(d)); }, mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t), dispatch: (l, n) => dispatch(l, n), _fh: h => { fh = h; } };
+window.__planner = { load: d => { fh = null; return load(normalize(d)); }, peek: () => ({ S, summary: S ? summary('revise') : '', seq: S ? seqText(S).join('\n') : '' }), mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t), dispatch: (l, n) => dispatch(l, n), _fh: h => { fh = h; } };
