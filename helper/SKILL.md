@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Carry out the latest request saved by the Planner app (New / Revise / Suggest looks / Apply / Export / Apply all changes) in a .planner project file. Use when the prompt says "Use the planner skill" or starts with /planner.
+description: Carry out the latest request saved by the Planner app (New / Revise / Suggestions / Apply / Export / Apply all changes) in a .planner project file. Use when the prompt says "Use the planner skill" or starts with /planner.
 ---
 
 # Planner: do the latest request (Claude Code on the user's computer)
@@ -17,7 +17,7 @@ The Planner app (https://rcz18.github.io/planner-app) saves a request into a `.p
 - Don't download or read the Planner app's source code to learn the format; this skill and the project's CLAUDE.md are enough. Read only what the request needs, then write the file.
 
 ## 1. Read
-1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
+1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "ideas" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
    - **Save tokens:** the file can hold big pictures (`data:image/...` strings). Never Read the whole file raw. Print it with the pictures cut out, and write the pictures you need to files:
      `node -e "const f=process.argv[1],fs=require('fs'),p=require('path');let n=0;const o=JSON.stringify(JSON.parse(fs.readFileSync(f,'utf8')),(k,v)=>typeof v==='string'&&v.startsWith('data:image')?(fs.writeFileSync(p.join(require('os').tmpdir(),'planner-img-'+(++n)+'.jpg'),Buffer.from(v.split(',')[1],'base64')),'<picture planner-img-'+n+'.jpg in temp>'):v,1);console.log(o)" "<file>"`
      Then Read only the pictures that matter for this request.
@@ -36,6 +36,23 @@ Milestones: reading 10 → transcript 25 → designing 50 → checking 80 → sa
   - `els` uses exactly the same format as that beat's `els` (cls, pos, html, in, out, …) with times inside the beat; `css` is extra CSS only for this look (prefix its classes with the look id, e.g. `.lkA-…`), `cam`/`fx` only if the look changes them.
   - `t` = the moment (seconds, plan time) where the look is fully on screen. The Planner app makes the screenshot itself from this; **do not render, do not make images**. `title` 2–4 words, `why` one short line.
   - Do not change `beats`, `version` or the user's review. Replace an older `suggest[<beat>]`. Then set `request.handled` and status done (seq name, 100). Reply in one line: the three look names.
+- **ideas** (💡 Suggestions): make **4 clearly different suggestions for the whole part** (`request.sequence`) and write them to that sequence as
+  `ideas: { at, note, history: [titles of every earlier suggestion], list: [ {id:"A", title, read, skill:{name, why}, shots:[t,…], beats:{ "<beatId>": {els, css?, cam?, fx?} }, css?}, … "D" ] }`.
+  - `title` 2–5 words. `read` = 2–4 short sentences in simple Taglish the user reads in the window: what it looks like, the camera, why it fits this part.
+  - `skill.name` = the skill that fits it best, from the table below; `skill.why` = one short line.
+  - `beats` = only the beats this suggestion changes, in the same format as the part's beats (`els` with cls/pos/html/in/out inside the beat, optional `cam` keys and `fx`); `css` = extra CSS for it (prefix every class with the id, e.g. `.idA-…`).
+  - `shots` = 1–3 plan times (seconds) where it looks best. **The Planner app makes the screenshots itself from this; do not render or make images.**
+  - Use the user's taste: top-level `likes` in the project file (suggestions they starred), their `review.direct`, notes and CLAUDE.md brand rules. Never repeat a title in `ideas.history`; add the new titles to it.
+  - Do not change `beats`, `version` or the review. Set `request.handled`, status done (seq name, 100). Reply in one line: the 4 titles.
+- **review.idea = "<id>"** (in revise / revise-all): rebuild that part from `ideas.list[<id>]` with its skill (table below), then apply the user's notes and `review.direct` on top. Bump version/badge as usual; keep `ideas` so they can come back to it.
+- **Skills for suggestions** (what to put in `skill.name`, and how to use it when it is applied). They are open-source libraries; when one is applied, fetch it once (`git clone --depth 1 <repo> ~/<name>` or `git -C ~/<name> pull`), read its SKILL.md / AGENTS.md for the technique, and build the look in the Planner's own format (els / css / cam). Only Export renders video.
+  | name | best for | repo |
+  |---|---|---|
+  | `planner-css` | clean kinetic text, callouts, simple cards, fastest | — |
+  | `video-shotcraft` | cinematic shot recipes: camera pushes, parallax, product/UI hero shots, beat sync | github.com/Vincentwei1021/video-shotcraft |
+  | `remotion-video` | motion graphics, infographics, counters, text highlights, light leaks, 3D | github.com/remotion-dev/skills |
+  | `lemo-opuscar` | a strong art style for the whole part (watercolor, oil paint, ukiyo-e, satellite briefing, exploded teardown) | github.com/lemomo-ai/lemo-opuscar |
+  | `pixel2motion` | logo reveals and brand stings | github.com/nolangz/pixel2motion |
 - **new**: design a new tab as CLAUDE.md describes (cut from Premiere via a read-only Claude Apply job, transcript words, beats, css).
 - **apply / export**: render at source quality into `Assets\AI render\` as CLAUDE.md describes, then place or replace it on the Premiere sequence with a Claude Apply job. If a render tool is missing on this computer (python, playwright, ffmpeg), set the status to error "Render tools missing on this PC" and say the user can run the export from the Claude chat instead.
 
@@ -44,7 +61,7 @@ Write ExtendScript to `Assets\AI render\_apply\<unique name>.job.json`. The Clau
 
 ## 4. Save safely
 - Re-read the `.planner` file right before writing. Change only the tabs you worked on; keep every other tab, `mirror` fields and the user's other edits exactly.
-- For each tab you finished (revise / revise-all / apply): clear its `review` (keep `approved` if set; this also clears `direct` and `looks`) and remove its `timeline` edits. A **suggest** request clears nothing.
+- For each tab you finished (revise / revise-all / apply): clear its `review` (keep `approved` if set; this also clears `direct` and `looks`) and remove its `timeline` edits. A **suggest** or **ideas** request clears nothing.
 - Set `request.handled = true` (keep the rest of the request) and `savedAt` to now.
 - Before writing, copy the old file to `Planner App\.backups\<name> <time>.planner`. Write JSON in one go.
 - Set the status to done.
