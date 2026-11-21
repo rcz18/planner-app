@@ -5,13 +5,17 @@
 'use strict';
 const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn } = require('child_process');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const DIR = __dirname;
 const CFG_FILE = path.join(DIR, 'config.json');
 let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch (e) {}
 const PORT = +cfg.port || 47321;
 const ROOT = path.resolve(cfg.root || os.homedir());
 const ORIGINS = ['https://rcz18.github.io'].concat(cfg.origins || []);
+if (process.platform !== 'win32') {
+  const extra = [cfg.claude && path.dirname(cfg.claude), path.dirname(process.execPath), path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].filter(Boolean);
+  process.env.PATH = [...new Set(extra.concat(String(process.env.PATH || '').split(':')).filter(Boolean))].join(':');
+}
 const LOGS = path.join(DIR, 'logs'); try { fs.mkdirSync(LOGS, { recursive: true }); } catch (e) {}
 const log = (...a) => { const line = new Date().toISOString() + ' ' + a.join(' '); try { fs.appendFileSync(path.join(LOGS, 'helper.log'), line + '\n'); } catch (e) {} if (process.stdout.isTTY) console.log(line); };
 
@@ -26,7 +30,7 @@ function findClaude() {
 }
 
 /* ---------- find the project file the app has open (the browser does not tell us its full path) ---------- */
-const SKIP = new Set(['node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
+const SKIP = new Set(['Library', 'node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
 const known = new Map(); // "name|id" → path
 async function findPlanner(name, id) {
   const key = name + '|' + id, hit = known.get(key);
@@ -77,9 +81,9 @@ async function startJob({ file, project, command }) {
   const pf = await findPlanner(file, project);
   if (!pf) throw Object.assign(new Error(`Could not find "${file}" inside ${ROOT}. Is it in your projects folder?`), { code: 404 });
   const cwd = projectRoot(pf);
-  const prompt = `Use the planner skill.\nProject file: ${pf}\nRequest: ${command}\nDo the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
+  const prompt = `Use the planner skill.\nProject file: ${pf}\nComputer: ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows PC' : process.platform}\nRequest: ${command}\nDo the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
-    '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,PowerShell,WebFetch,WebSearch,TodoWrite,Skill,Task'];
+    '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,' + (process.platform === 'win32' ? 'PowerShell,' : '') + 'WebFetch,WebSearch,TodoWrite,Skill,Task'];
   if (cfg.model) args.push('--model', cfg.model);
   const id = ++seq, logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
   job = { id, state: 'running', step: 'Starting Claude Code…', file: pf, command, started: new Date().toISOString(), lines: [], result: null };
@@ -126,7 +130,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/status') {
       const claude = findClaude();
       return reply(res, origin, 200, { ok: true, helper: VERSION, claude: !!claude, root: ROOT, busy: !!child, platform: process.platform,
-        loggedIn: fs.existsSync(path.join(os.homedir(), '.claude', '.credentials.json')) || process.platform === 'darwin' ? true : null });
+        loggedIn: (fs.existsSync(path.join(os.homedir(), '.claude', '.credentials.json')) || process.platform === 'darwin') ? true : null });
     }
     if (req.method === 'GET' && url.pathname === '/job') return reply(res, origin, 200, { job });
     if (!origin) return reply(res, null, 403, { error: 'Only the Planner app can do that' });
