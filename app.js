@@ -1,8 +1,9 @@
 import { createPreview } from './engine.js?v=16.5';
 import { createTimeline, fmtTC } from './timeline.js?v=16.5';
-import { attachTools, wireMic } from './tools.js?v=16.9';
-import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=16.9';
-import { openIdeas, ideaText } from './ideas.js?v=16.9';
+import { attachTools, wireMic } from './tools.js?v=17.0';
+import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.0';
+import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.0';
+import { openProgress, sound, kindName } from './progress.js?v=17.0';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -57,16 +58,36 @@ async function writeFile(handle, text) {
   if ((await handle.queryPermission?.({ mode: 'readwrite' })) !== 'granted' && (await handle.requestPermission?.({ mode: 'readwrite' })) !== 'granted') throw new Error('No permission to save this file');
   const w = await handle.createWritable(); await w.write(text); await w.close();
 }
+const seqKey = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.suggest || null, s.ideas || null, s.mirror || null]);
+let lastRequest = null;
+/* before writing: take every tab Claude changed on disk since we read it (keep your fresh edits only for the tab(s) in this request) */
+async function mergeDisk(request) {
+  let data; try { const f = await withTimeout(fh.getFile(), 15000, 'Reading the file'); data = normalize(JSON.parse(await f.text())); } catch (e) { return false; }
+  if (!data) return false; let cur = false;
+  const mine = new Set(request ? [request.sequence].concat(request.sequences || []) : []);
+  data.sequences.forEach(ds => { const i = P.sequences.findIndex(x => x.id === ds.id);
+    if (i < 0) { orig[ds.id] = JSON.parse(JSON.stringify(ds.beats)); P.sequences.push(ds); return; }
+    const x = P.sequences[i]; if (x.mirror || seqKey({ ...x, beats: orig[x.id] }) === seqKey(ds)) return;
+    if (mine.has(x.id) || editCount(x)) { ds.review = x.review; ds.timeline = x.timeline; }
+    if (x.history && x.history.length && !(ds.history && ds.history.length >= x.history.length)) ds.history = x.history;
+    orig[ds.id] = JSON.parse(JSON.stringify(ds.beats)); P.sequences[i] = ds; delete last[ds.id]; if (x === S) { S = ds; cur = true; } });
+  return cur;
+}
 async function save(request) {
   if (!P) return false;
   try { if (!fh) return await saveAs(request);
-    await writeFile(fh, serialize(request)); savedSig = sig(); paintTitle(); status('Saved ' + fh.name + ' ✓'); return true;
+    const cur = await mergeDisk(request);
+    if (request) lastRequest = request;
+    await writeFile(fh, serialize(request)); savedSig = sig(); paintTitle(); status('Saved ' + fh.name + ' ✓');
+    try { lastFileStamp = (await fh.getFile()).lastModified; } catch (e) {}
+    if (cur) await switchSeq(S.id);
+    return true;
   } catch (e) { if (e?.name !== 'AbortError') status('Could not save: ' + (e?.message || e)); return false; }
 }
 async function saveAs(request) {
   if (!P) return false;
   try { const h = await window.showSaveFilePicker({ id: 'planner', suggestedName: (P.name || 'project').replace(/[\\/:*?"<>|·]+/g, '-').replace(/\s+/g, ' ').trim() + '.planner', types: TYPES });
-    fh = h; await writeFile(h, serialize(request)); savedSig = sig(); await addRecent(h); paintTitle(); status('Saved ' + h.name + ' ✓'); return true;
+    fh = h; if (request) lastRequest = request; await writeFile(h, serialize(request)); savedSig = sig(); await addRecent(h); paintTitle(); status('Saved ' + h.name + ' ✓'); return true;
   } catch (e) { if (e?.name !== 'AbortError') status('Could not save: ' + (e?.message || e)); return false; }
 }
 async function openPicker() {
@@ -146,14 +167,14 @@ async function load(data) {
 }
 async function switchSeq(id) {
   const seq = P.sequences.find(s => s.id === id); if (!seq) return;
-  closeDirect(); closeIdeas();
+  closeDirect(); closeIdeas(); if (trying && trying.seq !== id) endTry(false);
   if (pv) pv.video.pause();
   tl && tl.destroy(); tools && tools.destroy(); tl = tools = null;
   S = seq; P.current = id;
   if (S.mirror) deriveMirror(S); else if (!(S.id in last)) last[S.id] = snap(S);
   $('#reviseBtn').disabled = $('#approveBtn').disabled = !!S.mirror; $('.side').classList.toggle('ro', !!S.mirror); paintApprove();
   $('#projTitle').textContent = `${P.name || ''}${P.sequences.length > 1 ? ' · ' + (S.name || S.id.toUpperCase()) : ''}`;
-  $('#projBadge').textContent = S.badge || S.version || ''; $('#projBadge').hidden = !(S.badge || S.version);
+  $('#projBadge').textContent = S.badge || S.version || ''; $('#projBadge').hidden = !(S.badge || S.version); paintPrev();
   $('#sendMsg').textContent = '';
   paintTabs(); paintBeats();
   const mine = S; let f;
@@ -161,14 +182,20 @@ async function switchSeq(id) {
   if (S !== mine) return;
   if (f instanceof File) mount(f); else { mount(null); showLink(S, f.need); }
 }
+const KEEP = Symbol('keep video');
 function mount(file) {
   closeDirect();
-  if (file) $('#linkMedia').hidden = true;
-  if (mediaURL) URL.revokeObjectURL(mediaURL);
-  mediaURL = file ? URL.createObjectURL(file) : '';
+  if (file !== KEEP) {
+    if (file) $('#linkMedia').hidden = true;
+    if (mediaURL) URL.revokeObjectURL(mediaURL);
+    mediaURL = file ? URL.createObjectURL(file) : '';
+  }
   tl && tl.destroy(); tools && tools.destroy(); tools = null;
   S.beats = JSON.parse(JSON.stringify(orig[S.id]));
-  pv = createPreview($('#monitor'), S, mediaURL);
+  let proj = S; const tr = trying && trying.seq === S.id ? trying : null;
+  if (tr) { const t = ideaBeats(orig[S.id], tr.idea); S.beats = t.beats; proj = { ...S, css: (S.css || '') + '\n' + t.css }; }
+  paintTry();
+  pv = createPreview($('#monitor'), proj, mediaURL);
   tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, onMedia: (k, m) => { if (k === 'move' && tools) tools.sync(); } });
   tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc });
   $('#tools').hidden = !!S.mirror; if (S.mirror) $('#toolHint').textContent = 'View only: this tab shows P1–P8 back to back, with every change you make in those tabs.';
@@ -206,6 +233,13 @@ function paintTabs() {
 /* one progress bar for everything Claude is working on (next to Apply all changes) */
 function paintJobBar() {
   const jb = $('#jobBar'); if (!jb) return;
+  const hcur = hq && hq.job && hq.job.state === 'running' ? hq.job : null;
+  if (P && hq && (hcur || hq.queue.length)) {   // the helper's queue knows exactly what runs now and what waits
+    const lp = hcur ? Math.round(+hcur.pct || 0) : 0, n = hq.queue.length;
+    jb.hidden = false; jb.className = 'jobBar'; jb.querySelector('i').style.width = Math.max(3, lp) + '%';
+    jb.querySelector('span').textContent = hcur ? `${hcur.seq === 'all' ? 'All' : hcur.seq} · ${kindName(hcur.kind)} · ${hcur.step || ''} · ${lp}%${n ? ` · +${n} in line` : ''}` : `Starting the next one… · ${n} in line`;
+    jb.title = 'Click to see the progress and the queue'; return;
+  }
   const act = Object.values(jobs).filter(j => j.state !== 'done' || j._fresh);
   if (!P || !act.length) { jb.hidden = true; return; }
   const pct = Math.round(act.reduce((a, j) => a + Math.max(0, Math.min(100, +j.pct || 0)), 0) / act.length);
@@ -214,7 +248,9 @@ function paintJobBar() {
   const names = act.map(j => j.seq).join(', ');
   jb.hidden = false; jb.className = 'jobBar' + (err ? ' err' : done ? ' done' : '');
   jb.querySelector('i').style.width = (done ? 100 : pct) + '%';
-  jb.querySelector('span').textContent = err ? `Problem: ${err.step || ''}` : done ? `Done ✓ ${names}` : `Claude · ${lead.step || 'Waiting…'} · ${pct}%`;
+  const waiting = busy.filter(j => j.state === 'waiting' && j !== lead).length, lp = Math.round(+lead.pct || 0);
+  jb.querySelector('span').textContent = err ? `Problem: ${err.step || ''}` : done ? `Done ✓ ${names}` : `${lead.seq} · ${lead.step || 'Waiting…'} · ${lp}%${waiting ? ` · +${waiting} in line` : ''}`;
+  jb.querySelector('i').style.width = (done ? 100 : Math.max(3, lp)) + '%';
   jb.title = act.map(j => `${j.seq}: ${j.step || ''} ${j.state === 'done' ? '✓' : (+j.pct || 0) + '%'}`).join('\n');
 }
 $('#seqTabs').onclick = e => { if (e.target.closest('[data-new]')) { newSeqDialog(); return; } const b = e.target.closest('[data-seq]'); if (b && P && b.dataset.seq !== S.id) switchSeq(b.dataset.seq); };
@@ -229,6 +265,7 @@ let helper = null, helperJobT = null;
 const hfetch = (p, o = {}) => fetch(HELPER + p, { cache: 'no-store', targetAddressSpace: 'loopback', ...o });
 async function helperPing() {
   try { const r = await hfetch('/status'); helper = r.ok ? await r.json() : null; } catch (e) { helper = null; }
+  if (helper && helper.queue && !hqT) watchQueue();
   paintHelper(); return helper;
 }
 function paintHelper() {
@@ -243,9 +280,10 @@ function paintHelper() {
 async function dispatch(line, names) {
   if ((helper && helper.claude) || (await helperPing())?.claude) {
     try {
-      const r = await hfetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: fh.name, project: P.id, command: line }) });
+      const r = await hfetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: fh.name, project: P.id, command: line, request: lastRequest }) });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
-      watchHelperJob(names); return 'code';
+      names.forEach(n => { const k = n.toLowerCase(); jobs[k] = { ...(jobs[k] || { seq: n }), seq: n, pct: 0, state: 'waiting', step: j.position > 1 ? `In line #${j.position}` : 'Starting…', hid: j.id, since: new Date().toISOString() }; });
+      watchQueue(); return 'code';
     } catch (e) { status('Claude Code: ' + e.message + ' (copied for the chat instead)'); }
   }
   try { await navigator.clipboard.writeText(line); return 'copied'; } catch (e) { return 'type'; }
@@ -254,24 +292,36 @@ function sentText(mode, line, extra = '') {
   if (mode === 'code') return `Claude Code is on it ✓ ${extra} Watch the progress bar at the top; the tab updates by itself.`;
   return (mode === 'copied' ? 'Now paste in the Claude chat (' + (IS_MAC ? 'Cmd+V' : 'Ctrl+V') + ') and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra;
 }
-function watchHelperJob(names) {
-  clearTimeout(helperJobT);
-  const tick = async () => {
-    let j = null; try { j = (await (await hfetch('/job')).json()).job; } catch (e) {}
-    if (!j) { helperJobT = setTimeout(tick, 3000); return; }
-    names.forEach(n => { const k = n.toLowerCase(), cur = jobs[k] || { seq: n, pct: 0 };
-      if (j.state === 'error') jobs[k] = { ...cur, state: 'error', step: j.step };
-      else if (j.state === 'done') { if (cur.state !== 'done') jobs[k] = { ...cur, state: 'done', pct: 100, step: 'Done', at: new Date().toISOString(), _fresh: true, _doneAt: Date.now() }; }
-      else if (cur.state !== 'working' && cur.state !== 'done') jobs[k] = { ...cur, state: 'waiting', step: 'Claude Code · ' + j.step };
-    });
-    if (helper) helper.busy = j.state === 'running'; paintHelper(); paintTabs();
-    if (j.state === 'running') { helperJobT = setTimeout(tick, 2000); return; }
-    if (j.state === 'done') status('Claude Code: ' + String(j.result?.text || 'Done').split('\n')[0].slice(0, 160));
-    else status('Claude Code: ' + j.step);
-    if (fh) { lastFileStamp = 0; try { await pullNewSequences(); } catch (e) {} } pollSoon(500);
-  };
-  helperJobT = setTimeout(tick, 1200);
+/* ---------- the helper's queue: one request after another, a sound when each is done ---------- */
+let hq = null, hqT = null, doneSeen = null, hadWork = false, progWin = null;
+async function fetchQueue() { try { const r = await hfetch('/queue'); if (!r.ok) return null; const d = await r.json(); return d && d.history ? d : null; } catch (e) { return null; } }
+function watchQueue() { clearTimeout(hqT); hqT = setTimeout(tickQueue, 600); }
+async function tickQueue() {
+  const d = await fetchQueue(); hq = d;
+  if (!d) { hqT = setTimeout(tickQueue, 5000); return; }
+  if (!doneSeen) doneSeen = new Set(d.history.map(h => h.id));
+  const cur = d.job && d.job.state === 'running' ? d.job : null, label = j => (j.seq === 'all' ? 'All' : j.seq);
+  const touch = (j, o) => { const k = String(label(j)).toLowerCase(); jobs[k] = { ...(jobs[k] || {}), seq: label(j), hid: j.id, ...o }; };
+  if (cur) { hadWork = true; touch(cur, { state: 'working', pct: cur.pct, step: `${kindName(cur.kind)} · ${cur.step || ''}`, since: cur.started }); }
+  d.queue.forEach((j, i) => { hadWork = true; touch(j, { state: 'waiting', pct: 0, step: `${kindName(j.kind)} · in line #${i + (cur ? 2 : 1)}`, since: j.queuedAt }); });
+  let newDone = false;
+  for (const h of d.history) { if (doneSeen.has(h.id)) continue; doneSeen.add(h.id);
+    if (h.state === 'cancelled') { const k = String(label(h)).toLowerCase(); if (jobs[k] && jobs[k].hid === h.id) delete jobs[k]; continue; }
+    newDone = true; const ok = h.state === 'done';
+    touch(h, ok ? { state: 'done', pct: 100, step: 'Done', at: h.ended, _fresh: true, _doneAt: Date.now() } : { state: 'error', step: h.step });
+    ok ? sound.ding() : sound.err();
+    if (h.result && h.result.text) status('Claude Code: ' + h.result.text.split('\n')[0].slice(0, 160)); }
+  if (newDone && fh) { lastFileStamp = 0; try { await pullNewSequences(); } catch (e) {} }
+  const busy = !!cur || d.queue.length > 0;
+  if (!busy && hadWork && newDone) { hadWork = false; setTimeout(() => sound.all(), 700); }
+  paintTabs();
+  hqT = setTimeout(tickQueue, busy ? 1500 : 6000);
 }
+$('#jobBar').onclick = () => { if (progWin) return;
+  progWin = openProgress({ get: () => hq, jobsFallback: () => Object.values(jobs),
+    cancel: async id => { try { await hfetch('/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch (e) {} tickQueue(); },
+    stop: async () => { try { await hfetch('/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) {} tickQueue(); },
+    onClose: () => { progWin = null; } }); };
 
 /* ---------- progress from Claude: Claude writes "Planner App/planner-status.json" while it works ---------- */
 const jobs = {};             // seq name (lower case) → { seq, pct, step, state }
@@ -367,6 +417,35 @@ function startDirect(lookBeat) {
 }
 $('#directBtn').onclick = () => startDirect();
 
+/* ---------- ▶ Try a suggestion in the live preview (nothing is saved), then Apply it or go back ---------- */
+let trying = null, trySnap = null;
+function paintTry() { const b = $('#tryBar'); if (!b) return; const on = !!(trying && S && trying.seq === S.id);
+  b.hidden = !on; if (on) b.querySelector('b').textContent = `Trying suggestion ${trying.idea.id} · ${trying.idea.title || ''}`; }
+function tryIdea(it) { if (!S) return; closeIdeas(); if (!trying) trySnap = snap(S); trying = { seq: S.id, idea: it }; mount(KEEP);
+  setTimeout(() => { const sh = (it.shots || [])[0]; pv && pv.playFrom(sh != null ? Math.max(0, +sh - 1.5) : 0); }, 400);
+  status(`Trying ${it.id} “${it.title || ''}”: nothing is saved until you press Apply`); }
+function endTry(remount = true) { if (!trying) return; const sid = trying.seq; trying = null;
+  if (S && S.id === sid && trySnap) restore(trySnap); trySnap = null; paintTry(); if (remount && S && S.id === sid) mount(KEEP); }
+$('#tryBack').onclick = () => { endTry(); status('Back to the original ✓'); };
+$('#tryApply').onclick = () => { if (!trying) return; const id = trying.idea.id; endTry(); S.review.idea = id; changedNow(); send('revise'); };
+$('#tryMore').onclick = () => { endTry(); startIdeas(); };
+
+/* ---------- ↩ previous version: the app keeps the last 5 versions of each part ---------- */
+function remember(list) { const at = new Date().toISOString();
+  list.forEach(s => { if (s.mirror) return; const v = { version: s.version || '', badge: s.badge || '', beats: JSON.parse(JSON.stringify(orig[s.id] || s.beats)), css: s.css || '', at };
+    const h = (s.history || []).filter(x => x.version !== v.version || x.badge !== v.badge); s.history = [v].concat(h).slice(0, 5); }); }
+function paintPrev() { const b = $('#prevBtn'); if (!b || !S) return; const p = (S.history || [])[0]; b.hidden = !p || !!S.mirror; if (p) { b.textContent = `↩ ${p.version || 'previous'}`; b.title = `Go back to ${p.version || 'the previous version'} (${S.version || 'this one'} stays in history so you can come back)`; } }
+$('#prevBtn').onclick = async () => {
+  const p = (S.history || [])[0]; if (!p) return;
+  const j = jobs[seqName().toLowerCase()]; if (j && (j.state === 'working' || j.state === 'waiting') && !/Paste/.test(j.step || '')) { status(`Wait: Claude is still working on ${seqName()}`); return; }
+  if (!(await ask(`Go back to ${p.version || 'the previous version'}? ${S.version || 'This version'} stays in history, so you can come back with the same button.`, 'Go back', 'Cancel'))) return;
+  endTry(false);
+  const cur = { version: S.version || '', badge: S.badge || '', beats: JSON.parse(JSON.stringify(orig[S.id])), css: S.css || '', at: new Date().toISOString() };
+  S.history = [cur].concat(S.history.slice(1)); S.version = p.version; S.badge = p.badge; S.css = p.css; orig[S.id] = JSON.parse(JSON.stringify(p.beats));
+  P.sequences.filter(x => x.mirror).forEach(F => deriveMirror(F));
+  await save(); await switchSeq(S.id); status(`Back to ${p.version} ✓`);
+};
+
 /* ---------- 💡 Suggestions from Claude: 4 looks for the whole part, Liked list for every project ---------- */
 let ideasWin = null, pendingIdeas = null, likesMem = null;
 kvGet('likes').then(v => { likesMem = Array.isArray(v) ? v : []; });
@@ -383,7 +462,7 @@ function startIdeas() {
   if (!S || S.mirror) return; closeIdeas();
   ideasWin = openIdeas({ P, S, beats: orig[S.id], mediaURL, status,
     getLikes: () => likesMem || [], setLikes,
-    onGenerate: askIdeas, onApply: () => send('revise'), onChange: changedNow,
+    onGenerate: askIdeas, onApply: () => send('revise'), onChange: changedNow, onTry: tryIdea,
     busy: () => { const j = jobs[seqName().toLowerCase()]; return !!(pendingIdeas === S.id && j && j.state !== 'done' && j.state !== 'error'); },
     onClose: () => { ideasWin = null; paintIdeasBtn(); } });
 }
@@ -468,7 +547,8 @@ function summary(kind) {
   return L.join('\n');
 }
 async function send(kind) {
-  if (!P) return;
+  if (!P) return; endTry();
+  if (kind === 'revise') { remember([S]); paintPrev(); }
   const ok = await save({ kind, sequence: S.id, at: new Date().toISOString(), summary: summary(kind) });
   if (!ok) return;
   const line = `/planner ${kind === 'apply' ? 'apply' : 'revise'} ${seqName()}`;
@@ -617,6 +697,7 @@ $('#applyAllBtn').onclick = async () => {
   const list = P.sequences.filter(s => !s.mirror && (editCount(s) || s.review.approved));
   if (!list.length) { status('No changes yet in any tab'); return; }
   const summary = ['Apply all my changes (revise every tab listed; tabs marked APPROVED need no changes unless they have notes):'].concat(...list.map(seqText)).join('\n');
+  remember(list.filter(s => !s.review.approved || editCount(s)));
   const ok = await save({ kind: 'revise-all', sequence: 'all', sequences: list.map(s => s.id), at: new Date().toISOString(), summary });
   if (!ok) return;
   const line = '/planner apply all changes';

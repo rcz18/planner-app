@@ -2,7 +2,7 @@
    (no renders, few tokens), a short read and the skill that fits it best.
    ☆ Like keeps one in your Liked list (all projects); Choose + Apply has Claude build the part from it;
    🔄 Generate 4 new asks for a fresh batch. */
-import { snapshot } from './tools.js?v=16.9';
+import { snapshot } from './tools.js?v=17.0';
 import { createPreview } from './engine.js?v=16.5';
 
 const W = 960, H = 540;
@@ -23,6 +23,14 @@ export function ideaText(s) {
   return it ? `USE SUGGESTION ${it.id} “${it.title || ''}” (ideas.list in the project file) with skill ${(it.skill || {}).name || 'planner-css'}: rebuild this part from it, keep my direct notes on top` : '';
 }
 
+/* a part's beats with one suggestion put in (for screenshots and for ▶ Try) */
+export function ideaBeats(beats, idea) {
+  const over = idea.beats || {};
+  const nb = JSON.parse(JSON.stringify(beats)).map(b => { const o = over[b.id]; if (!o) return b;
+    return { ...b, ...(o.els ? { els: JSON.parse(JSON.stringify(o.els)) } : {}), ...(o.cam ? { cam: o.cam } : {}), ...(o.fx ? { fx: o.fx } : {}) }; });
+  return { beats: nb, css: (idea.css || '') + '\n' + Object.values(over).map(o => o.css || '').join('\n') };
+}
+
 /* ---------- a still of one suggestion at time t, made here in the app (cached) ---------- */
 const cache = new Map();
 export function ideaShot(S, beats, idea, t, src) {
@@ -33,11 +41,8 @@ export function ideaShot(S, beats, idea, t, src) {
     host.style.cssText = `position:fixed;left:-30000px;top:0;width:${W}px;height:${H}px;overflow:hidden;background:#000;pointer-events:none`;
     document.body.appendChild(host);
     try {
-      const over = idea.beats || {};
-      const nb = JSON.parse(JSON.stringify(beats)).map(b => { const o = over[b.id]; if (!o) return b;
-        return { ...b, ...(o.els ? { els: JSON.parse(JSON.stringify(o.els)) } : {}), ...(o.cam ? { cam: o.cam } : {}), ...(o.fx ? { fx: o.fx } : {}) }; });
-      const css = Object.values(over).map(o => o.css || '').join('\n');
-      const proj = { ...S, beats: nb, css: (S.css || '') + '\n' + (idea.css || '') + '\n' + css, review: { moves: {}, cams: [], drawings: [], media: [] } };
+      const ib = ideaBeats(beats, idea);
+      const proj = { ...S, beats: ib.beats, css: (S.css || '') + '\n' + ib.css, review: { moves: {}, cams: [], drawings: [], media: [] } };
       const pv = createPreview(host, proj, src || ''), v = pv.video;
       const once = (ev, ms) => new Promise(r => { const f = () => r(true); v.addEventListener(ev, f, { once: true }); setTimeout(() => { v.removeEventListener(ev, f); r(false); }, ms); });
       if (src) {
@@ -91,7 +96,7 @@ export function openIdeas(ctx) {
         <div class="iwTxt"><h4><span class="iwId">${esc(it.id)}</span> ${esc(it.title || '')}</h4>
           <p>${esc(it.read || it.why || '')}</p>
           <p class="iwSkill">🧰 <b>${esc(skillName((it.skill || {}).name))}</b>${(it.skill || {}).why ? ' · ' + esc(it.skill.why) : ''}</p></div>
-        <div class="iwBtns"><button type="button" class="btn sm iwLike${isLiked(it) ? ' on' : ''}" data-a="like">${isLiked(it) ? '★ Liked' : '☆ Like'}</button><button type="button" class="btn sm${chosen === it.id ? ' primary' : ''}" data-a="choose">${chosen === it.id ? '✓ Chosen' : 'Choose'}</button></div></article>`; }).join('')}</div>`;
+        <div class="iwBtns"><button type="button" class="btn sm iwLike${isLiked(it) ? ' on' : ''}" data-a="like">${isLiked(it) ? '★ Liked' : '☆ Like'}</button><button type="button" class="btn sm" data-a="try" title="Play it in the preview first (nothing is saved)">▶ Try</button><button type="button" class="btn sm${chosen === it.id ? ' primary' : ''}" data-a="choose">${chosen === it.id ? '✓ Chosen' : 'Choose'}</button></div></article>`; }).join('')}</div>`;
     list.forEach(it => paintPic(it));
   }
   async function paintPic(it) {
@@ -117,6 +122,7 @@ export function openIdeas(ctx) {
     if (e.target.dataset.shot !== undefined) { shotIx[it.id] = +e.target.dataset.shot; paintPic(it); return; }
     const a = e.target.dataset.a;
     if (a === 'choose') { chosen = chosen === it.id ? '' : it.id; paint(); return; }
+    if (a === 'try') { ctx.onTry && ctx.onTry(it); return; }
     if (a === 'like') {
       const L = likes().slice(), k = likeKey(it), at = L.findIndex(l => l.key === k);
       if (at >= 0) { const [gone] = L.splice(at, 1); await ctx.setLikes(L, gone, false); }
