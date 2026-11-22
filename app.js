@@ -568,9 +568,9 @@ $('#renderBtn').onclick = async () => {
   if (!ok) return;
   const line = `/planner export ${seqName()}`;
   jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
-  /* Export always goes to the Claude chat (renders there, not on this PC) */
-  let mode = 'type'; try { await navigator.clipboard.writeText(line); mode = 'copied'; } catch (e) {}
-  jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
+  /* Export goes to Claude Code on this computer (Planner Helper) like Revise; without the helper it is copied for the Claude chat */
+  const mode = await dispatch(line, [seqName()]);
+  if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
   $('#sendMsg').innerHTML = `Export for <b>${esc(seqName())} ${esc(S.version || '')}</b> saved ✓ ` + sentText(mode, line, 'Keep Premiere open with the Claude Apply panel.');
   status(mode === 'code' ? 'Claude Code is exporting ' + seqName() : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
