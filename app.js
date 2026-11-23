@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=17.3';
-import { createTimeline, fmtTC } from './timeline.js?v=17.3';
-import { attachTools, wireMic } from './tools.js?v=17.3';
+import { createPreview } from './engine.js?v=17.4';
+import { createTimeline, fmtTC } from './timeline.js?v=17.4';
+import { attachTools, wireMic } from './tools.js?v=17.4';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
@@ -196,6 +196,7 @@ function mount(file) {
   if (tr) { const t = ideaBeats(orig[S.id], tr.idea); S.beats = t.beats; proj = { ...S, css: (S.css || '') + '\n' + t.css }; }
   if (!tr) applyLayers(S.beats, S.review.layers);
   paintTry();
+  if (pv && pv.dispose) pv.dispose();
   pv = createPreview($('#monitor'), proj, mediaURL);
   const ro = !!S.mirror;
   tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, status,
@@ -233,7 +234,7 @@ function addLayer(kind, text, t) { if (!S || S.mirror) return;
   t = Math.max(0, Math.min(S.duration - 0.2, +t || 0)); const id = 't' + Date.now().toString(36);
   ((S.review.layers ||= {}).added ||= []).push({ id, text, t0: +t.toFixed(3), t1: +Math.min(S.duration, t + 2).toFixed(3) });
   changedNow(); if (tools) tools.use('move'); remount('u:' + id); status('Text layer added · drag it, resize it, trim it on the timeline'); }
-const plainLabel = e => { const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); const s2 = (t.textContent || '').replace(/\s+/g, ' ').trim(); return s2 ? s2.slice(0, 40) : 'graphic ' + ((e.cls || '').split(' ')[0] || ''); };
+const plainLabel = e => { if (e.three) return '3D ' + (e.three.scene || 'scene') + ((e.three.opts || {}).half ? ' ' + e.three.opts.half : ''); const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); const s2 = (t.textContent || '').replace(/\s+/g, ' ').trim(); return s2 ? s2.slice(0, 40) : 'graphic ' + ((e.cls || '').split(' ')[0] || ''); };
 function layersText(s) { const L = s.review.layers; if (!L) return []; const out = [], base = orig[s.id] || [], del = L.deleted || [];
   const elAt = k => { const [bid, i] = k.split(':'); const b = base.find(x => x.id === bid); return b && b.els[+i]; };
   const added = k => (L.added || []).find(x => 'u:' + x.id === k);

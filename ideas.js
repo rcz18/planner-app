@@ -2,8 +2,8 @@
    (no renders, few tokens), a short read and the skill that fits it best.
    ☆ Like keeps one in your Liked list (all projects); Choose + Apply has Claude build the part from it;
    🔄 Generate 4 new asks for a fresh batch. */
-import { snapshot } from './tools.js?v=17.3';
-import { createPreview } from './engine.js?v=17.3';
+import { snapshot } from './tools.js?v=17.4';
+import { createPreview } from './engine.js?v=17.4';
 
 const W = 960, H = 540;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

@@ -35,7 +35,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const heads = box.querySelector('.tlHeads'), scroll = box.querySelector('.tlScroll'), inner = box.querySelector('.tlInner'), ph = box.querySelector('.tlPH');
   const tcEl = box.querySelector('.tlTC'), selEl = box.querySelector('.tlSel'), zoomIn = box.querySelector('.tlZoom input');
 
-  const labelOf = e => { const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); let s = (t.textContent || '').replace(/\s+/g, ' ').trim(); if (!s) s = 'FX · ' + ((e.cls || 'graphic').split(' ')[0]); return s.length > 34 ? s.slice(0, 33) + '…' : s; };
+  const labelOf = e => { if (e.three) { const h = e.three.opts && e.three.opts.half; return '3D ' + (e.three.scene || 'scene') + (h && h !== 'all' ? ' · ' + h.toUpperCase() : ''); } const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); let s = (t.textContent || '').replace(/\s+/g, ' ').trim(); if (!s) s = 'FX · ' + ((e.cls || 'graphic').split(' ')[0]); return s.length > 34 ? s.slice(0, 33) + '…' : s; };
   const clips = [];
   BEATS.forEach(b => b.els.forEach((e, i) => {
     if (e.in === undefined || e.out === undefined || e._del) return;

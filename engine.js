@@ -1,6 +1,13 @@
 /* Planner engine: draws a project's plan (beats, text, animations, camera) live over the video.
    The project file carries its own CSS for its animations; it runs inside a shadow root so it
    never touches the app's own look. */
+/* ---------- real 3D layers (Three.js, loaded only when a plan uses them) ----------
+   An element with  three: { scene: '<name in scenes3d/>' | code: '<module source>', opts: {...} }  gets a WebGL canvas.
+   The scene module's default export receives { THREE, renderer, canvas, opts, dur, RoomEnvironment, RoundedBoxGeometry }
+   and returns { render(localTime, planTime), resize?(w, h) }. Rendering follows the plan time, so pause, scrub and export match. */
+let LIB3 = null;
+const lib3 = () => LIB3 ||= Promise.all([import('./vendor/three.module.min.js'), import('./vendor/RoomEnvironment.js'), import('./vendor/RoundedBoxGeometry.js')])
+  .then(([THREE, a, b]) => ({ THREE, RoomEnvironment: a.RoomEnvironment, RoundedBoxGeometry: b.RoundedBoxGeometry }));
 export function camAt(cam, t) {
   if (!cam.length) return [t, 1, 0, 0, 0];
   let k = cam[0];
@@ -45,10 +52,11 @@ export function createPreview(host, project, src) {
   v.src = src || ''; v.preload = 'auto'; v.playsInline = true;
   el.appendChild(v);
   const scrim = document.createElement('div'); scrim.className = 'scrim'; el.appendChild(scrim);
-  const ovs = [], byK = {};
+  const ovs = [], byK = {}, threes = [];
   const scs = all.filter(b => b.scene); let sbg = null, pc = null, pctx = null;
   const base = {};
   const mk = e => { const d = document.createElement('div'); d.className = 'ov ' + (e.cls || ''); d.style.cssText = e.pos || ''; d.innerHTML = e.html || ''; d.dataset.k = e._k; el.appendChild(d); ovs.push([e, d]); byK[e._k] = d;
+    if (e.three) { const cv = document.createElement('canvas'); cv.className = 'c3d'; cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none'; d.appendChild(cv); const r = { e, d, cv, inst: null }; threes.push(r); r.ready = start3(r); }
     const tr = /translate:\s*(-?[\d.]+)cqw\s+(-?[\d.]+)cqw/.exec(e.pos || ''), sc = /(?:^|;)\s*scale:\s*([\d.]+)/.exec(e.pos || '');
     base[e._k] = { x: tr ? +tr[1] : 0, y: tr ? +tr[2] : 0, s: sc ? +sc[1] : 1 }; };
   if (scs.length) { sbg = document.createElement('div'); sbg.className = 'scenebg'; el.appendChild(sbg); }
@@ -81,7 +89,23 @@ export function createPreview(host, project, src) {
     ovs.forEach(([e, d]) => { d.classList.toggle('on', t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
       d.querySelectorAll('[data-glow]').forEach(g => g.classList.toggle('glow', t >= +g.dataset.glow)); d.querySelectorAll('[data-show]').forEach(g => g.classList.toggle('show', t >= +g.dataset.show)); });
     syncAnims(t);
+    threes.forEach(r => { if (r.inst && t >= r.e.in && t < r.e.out) { try { r.inst.render(t - r.e.in, t); } catch (err) {} } });
   }
+  async function start3(r) {
+    try { const L = await lib3(), T = r.e.three;
+      const mod = T.code ? await import(URL.createObjectURL(new Blob([T.code], { type: 'text/javascript' }))) : await import(new URL('./scenes3d/' + T.scene + '.js', import.meta.url).href);
+      if (dead) return;
+      const renderer = new L.THREE.WebGLRenderer({ canvas: r.cv, alpha: true, antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+      renderer.setClearColor(0x000000, 0); renderer.outputColorSpace = L.THREE.SRGBColorSpace; renderer.toneMapping = L.THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1;
+      r.renderer = renderer; r.inst = await mod.default({ ...L, renderer, canvas: r.cv, opts: T.opts || {}, dur: r.e.out - r.e.in });
+      size3(r); const t = lt === undefined ? 0 : lt; if (t >= r.e.in && t < r.e.out) r.inst.render(t - r.e.in, t);
+    } catch (err) { console.warn('3D layer failed', r.e._k, err); } }
+  function size3(r) { if (!r.renderer) return; const w = el.clientWidth || 960, h = el.clientHeight || 540; const pr = Math.min(2, Math.max(1, 1920 / w, window.devicePixelRatio || 1));
+    r.renderer.setPixelRatio(pr); r.renderer.setSize(w, h, false); if (r.inst && r.inst.resize) r.inst.resize(w, h); }
+  let dead = false;
+  const ro3 = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { threes.forEach(size3); if (lt !== undefined) threes.forEach(r => { if (r.inst && lt >= r.e.in && lt < r.e.out) r.inst.render(lt - r.e.in, lt); }); }) : null;
+  if (ro3) ro3.observe(el);
+  function dispose() { dead = true; if (ro3) ro3.disconnect(); threes.forEach(r => { try { r.inst && r.inst.dispose && r.inst.dispose(); r.renderer && (r.renderer.dispose(), r.renderer.forceContextLoss()); } catch (err) {} }); }
   /* paused = every animation freezes at the playhead (and scrubbing shows the right pose); play = they carry on from there */
   let wasPaused = null;
   function syncAnims(t) {
@@ -122,5 +146,5 @@ export function createPreview(host, project, src) {
   v.addEventListener('loadedmetadata', () => { v.currentTime = toSrc(Math.min(2, DUR / 2)); });
   applyMoves(); render(0);
   function refresh() { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; lt = undefined; render(time()); }
-  return { video: v, render, refresh, playFrom, seek, time, toSrc, cuts, byK, frame: el, applyMoves, camsNow, base, zOrder: { bg: bgEls.map(e => e._k), fg: fgEls.map(e => e._k) } };
+  return { video: v, render, refresh, playFrom, seek, time, toSrc, cuts, byK, frame: el, applyMoves, camsNow, base, dispose, ready3d: () => Promise.all(threes.map(r => r.ready)), has3d: () => threes.length > 0, zOrder: { bg: bgEls.map(e => e._k), fg: fgEls.map(e => e._k) } };
 }
