@@ -1,8 +1,8 @@
-import { createPreview } from './engine.js?v=16.5';
-import { createTimeline, fmtTC } from './timeline.js?v=16.5';
-import { attachTools, wireMic } from './tools.js?v=17.0';
-import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.0';
-import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.0';
+import { createPreview } from './engine.js?v=17.2';
+import { createTimeline, fmtTC } from './timeline.js?v=17.2';
+import { attachTools, wireMic } from './tools.js?v=17.2';
+import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
+import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
 
 const $ = s => document.querySelector(s);
@@ -194,14 +194,53 @@ function mount(file) {
   S.beats = JSON.parse(JSON.stringify(orig[S.id]));
   let proj = S; const tr = trying && trying.seq === S.id ? trying : null;
   if (tr) { const t = ideaBeats(orig[S.id], tr.idea); S.beats = t.beats; proj = { ...S, css: (S.css || '') + '\n' + t.css }; }
+  if (!tr) applyLayers(S.beats, S.review.layers);
   paintTry();
   pv = createPreview($('#monitor'), proj, mediaURL);
-  tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, onMedia: (k, m) => { if (k === 'move' && tools) tools.sync(); } });
-  tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc });
+  const ro = !!S.mirror;
+  tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, onMedia: (k, m) => { if (k === 'move' && tools) tools.sync(); }, status,
+    onLayers: ro ? null : setLayerOrder, onDelete: ro ? null : deleteLayer, onAddLayer: ro ? null : addLayer });
+  tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc, onDelete: ro ? null : deleteLayer });
   $('#tools').hidden = !!S.mirror; if (S.mirror) $('#toolHint').textContent = 'View only: this tab shows P1–P8 back to back, with every change you make in those tabs.';
   pv.video.addEventListener('timeupdate', markBeat); pv.video.addEventListener('seeked', markBeat);
   if (S.mirror) { const pb = $('#timeline .tlPlay'); if (pb) { const b = document.createElement('button'); b.type = 'button'; b.className = 'tlBtn tlRefresh'; b.textContent = '⟳ Refresh FULL'; b.title = 'Get the newest P tabs into FULL'; b.onclick = refreshFull; pb.after(b); } }
 }
+/* ---------- layers (timeline): your order, deleted layers and new text layers, kept in review.layers ---------- */
+function applyLayers(beats, L) { if (!L) return beats;
+  const del = new Set(L.deleted || []);
+  beats.forEach(b => b.els.forEach((e, i) => { if (del.has(b.id + ':' + i)) e._del = true; }));
+  (L.added || []).forEach(a => { const b = beats.find(x => a.t0 >= x.t0 && a.t0 < x.t1) || beats[beats.length - 1]; if (!b) return;
+    b.els.push({ _uid: a.id, in: a.t0, out: a.t1, cls: 'uLayer', pos: 'left:0;right:0;top:62%;display:flex;justify-content:center', html: `<div class="uTxt">${esc(a.text)}</div>` }); });
+  return beats; }
+const cleanLayers = R => { const L = R.layers; if (!L) return; ['deleted', 'added', 'order'].forEach(x => { if (L[x] && !L[x].length) delete L[x]; }); if (!Object.keys(L).length) delete R.layers; };
+/* rebuild the preview + timeline, keeping the time, the tool and the selection */
+function remount(k) { if (!S || !pv) return; const t = pv.time(), m = tools && tools.mode ? tools.mode() : '';
+  mount(KEEP); const go = () => pv.seek(t);
+  go(); if (pv.video.readyState < 1) pv.video.addEventListener('loadedmetadata', go, { once: true });
+  if (m && tools) tools.use(m); if (k) { tl.selectKey && tl.selectKey(k); if (m === 'move' && tools) tools.pick(k); } }
+function setLayerOrder(order, k) { if (!S || S.mirror) return; (S.review.layers ||= {}).order = order; changedNow(); remount(k); status('Layer moved · Ctrl+Z to undo'); }
+function deleteLayer(k) { if (!S || S.mirror || !k) return; const R = S.review;
+  if (k.startsWith('m:')) { const i = (R.media || []).findIndex(x => 'm:' + x.id === k); if (i >= 0) R.media.splice(i, 1); changedNow(); remount(); status('Your photo/video was deleted · Ctrl+Z to undo'); return; }
+  const L = R.layers ||= {};
+  if (k.startsWith('u:')) L.added = (L.added || []).filter(a => 'u:' + a.id !== k); else { L.deleted ||= []; if (!L.deleted.includes(k)) L.deleted.push(k); }
+  delete S.timeline[k]; if (R.moves) delete R.moves[k]; if (L.order) L.order = L.order.filter(x => x !== k);
+  cleanLayers(R); changedNow(); remount(); status('Layer deleted · Ctrl+Z to undo'); }
+function addLayer(kind, text, t) { if (!S || S.mirror) return;
+  if (kind === 'media') { $('#tools .addMedia')?.click(); return; }
+  t = Math.max(0, Math.min(S.duration - 0.2, +t || 0)); const id = 't' + Date.now().toString(36);
+  ((S.review.layers ||= {}).added ||= []).push({ id, text, t0: +t.toFixed(3), t1: +Math.min(S.duration, t + 2).toFixed(3) });
+  changedNow(); if (tools) tools.use('move'); remount('u:' + id); status('Text layer added · drag it, resize it, trim it on the timeline'); }
+const plainLabel = e => { const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); const s2 = (t.textContent || '').replace(/\s+/g, ' ').trim(); return s2 ? s2.slice(0, 40) : 'graphic ' + ((e.cls || '').split(' ')[0] || ''); };
+function layersText(s) { const L = s.review.layers; if (!L) return []; const out = [], base = orig[s.id] || [], del = L.deleted || [];
+  const elAt = k => { const [bid, i] = k.split(':'); const b = base.find(x => x.id === bid); return b && b.els[+i]; };
+  const added = k => (L.added || []).find(x => 'u:' + x.id === k);
+  const name = k => k.startsWith('u:') ? `my text “${(added(k) || {}).text || ''}”` : `${k.split(':')[0]} el#${k.split(':')[1]} “${elAt(k) ? plainLabel(elAt(k)) : '?'}”`;
+  if (del.length) out.push('Deleted layers (remove them from the plan): ' + del.map(name).join('; '));
+  (L.added || []).forEach(a => { const k = 'u:' + a.id, tm = (s.timeline || {})[k], mv = (s.review.moves || {})[k];
+    out.push(`My new text layer “${a.text}”: show ${(tm ? +tm.in : a.t0).toFixed(2)}–${(tm ? +tm.out : a.t1).toFixed(2)} s, centered across the frame at 62% height${mv ? `, then moved x${mv.x >= 0 ? '+' : ''}${mv.x} y${mv.y >= 0 ? '+' : ''}${mv.y} (cqw of frame width)${Math.abs((mv.s || 1) - 1) > .001 ? ', size ' + Math.round(mv.s * 100) + '%' : ''}` : ''}. Build it in the brand text style at exactly that place and time.`); });
+  if ((L.order || []).length) out.push('Layer order I set (back → front, keep exactly; later = in front): ' + L.order.filter(k => !del.includes(k) && (!k.startsWith('u:') || added(k))).map(name).join(' · '));
+  return out; }
+
 /* Refresh FULL: read the newest P tabs from the project file (unless you have unsaved edits in a tab), then rebuild FULL */
 async function refreshFull() {
   if (!S || !S.mirror) return; const id = S.id, t = pv ? pv.time() : 0, wasDirty = dirty(); let n = 0;
@@ -543,6 +582,7 @@ function summary(kind) {
   directText(S).forEach(x => L.push(x));
   if (ideaText(S)) L.push(ideaText(S));
   mediaText(S).forEach(x => L.push(x));
+  layersText(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   return L.join('\n');
 }
@@ -562,7 +602,7 @@ $('#reviseBtn').onclick = () => send('revise');
 /* one button: render this exact version and apply it to its Premiere sequence (no plan changes) */
 $('#renderBtn').onclick = async () => {
   if (!P || !S) return;
-  const R = S.review, edits = Object.values(R.picks).filter(Boolean).length + Object.values(R.notes).filter(x => x && x.trim()).length + Object.keys(S.timeline).length + Object.keys(R.moves || {}).length + (R.cams || []).length + (R.drawings || []).length + ((R.general || '').trim() ? 1 : 0);
+  const R = S.review, edits = Object.values(R.picks).filter(Boolean).length + Object.values(R.notes).filter(x => x && x.trim()).length + Object.keys(S.timeline).length + Object.keys(R.moves || {}).length + (R.cams || []).length + (R.drawings || []).length + ((R.general || '').trim() ? 1 : 0) + layerCount(R);
   if (edits && !(await ask(`${seqName()} has notes or edits that Claude hasn't done yet. Export ${S.version || 'this version'} as it is now (your notes are ignored)?`, 'Export as is', 'Cancel'))) return;
   const ok = await save({ kind: 'apply', sequence: S.id, at: new Date().toISOString(), summary: `Export ${seqName()} ${S.version || ''}: render exactly as it is in the planner and apply it to its Premiere sequence. No plan changes.` });
   if (!ok) return;
@@ -578,7 +618,8 @@ $('#renderBtn').onclick = async () => {
 
 
 /* ---------- edits: count, undo / redo (Ctrl+Z / Ctrl+Y) ---------- */
-function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0); }
+function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0) + layerCount(r); }
+const layerCount = r => r.layers ? (r.layers.deleted || []).length + (r.layers.added || []).length + ((r.layers.order || []).length ? 1 : 0) : 0;
 const hist = {}, redo = {}, last = {};
 const snap = s => JSON.stringify({ review: s.review, timeline: s.timeline });
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/.test(a.type || ''))); };
@@ -592,10 +633,10 @@ function checkpoint(force) {
 function changedNow() { checkpoint(true); paintTitle(); }
 setInterval(() => checkpoint(false), 700);
 function restore(str) {
-  const o = JSON.parse(str);
+  const o = JSON.parse(str), lay0 = JSON.stringify(S.review.layers || null);
   Object.keys(S.timeline).forEach(k => delete S.timeline[k]); Object.assign(S.timeline, o.timeline);
   Object.keys(S.review).forEach(k => delete S.review[k]); Object.assign(S.review, o.review);
-  last[S.id] = str; tl && tl.sync && tl.sync(); tools && tools.sync && tools.sync(); paintBeats(); paintApprove(); paintTitle();
+  last[S.id] = str; if (JSON.stringify(S.review.layers || null) !== lay0) remount(); else { tl && tl.sync && tl.sync(); tools && tools.sync && tools.sync(); } paintBeats(); paintApprove(); paintTitle();
 }
 function undo() { if (!S || S.mirror) return; checkpoint(true); const h = hist[S.id] || []; if (!h.length) { status('Nothing to undo'); return; }
   (redo[S.id] ||= []).push(last[S.id]); restore(h.pop()); status('Undo ✓'); }
@@ -683,6 +724,7 @@ function seqText(s) {
   directText(s).forEach(x => L.push(x));
   if (ideaText(s)) L.push(ideaText(s));
   mediaText(s).forEach(x => L.push(x));
+  layersText(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
 }

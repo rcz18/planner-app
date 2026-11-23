@@ -3,8 +3,8 @@
    📸 screenshot the preview anywhere in the part (as many as you want) → comment + camera tags on each →
    double-click a screenshot to draw on it (pen, line, arrow, box, circle).
    💡 Looks: Claude writes a few looks for one beat; this app takes their screenshots itself (no renders, few tokens). */
-import { snapshot, wireMic } from './tools.js?v=17.0';
-import { createPreview } from './engine.js?v=16.5';
+import { snapshot, wireMic } from './tools.js?v=17.2';
+import { createPreview } from './engine.js?v=17.2';
 
 const W = 960, H = 540;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

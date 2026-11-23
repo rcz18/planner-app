@@ -28,12 +28,19 @@ export function createPreview(host, project, src) {
   root.innerHTML = '';
   const st = document.createElement('style');
   st.textContent = (project.css || '').replace(/:root\b/g, ':host') +
-    `\n:host{display:block}\n.frame{border-radius:0!important}\n.playBtn,.tcLive{display:none!important}\n.ov.pa-sel{outline:2px dashed rgba(255,224,138,.9);outline-offset:4px}`;
+    `\n:host{display:block}\n.frame{border-radius:0!important}\n.playBtn,.tcLive{display:none!important}\n.ov.pa-sel{outline:2px dashed rgba(255,224,138,.9);outline-offset:4px}` +
+    `\n.uTxt{font:900 italic 6.4cqw/1.05 'Roboto Condensed',Roboto,sans-serif;color:#fff;text-align:center;white-space:pre-line;text-shadow:0 .25cqw .9cqw rgba(0,0,0,.65),0 0 .15cqw rgba(0,0,0,.5)}`;
   root.appendChild(st);
   const el = document.createElement('div'); el.className = 'frame'; el.id = 'frame-all'; root.appendChild(el);
 
   const FPSRC = project.fps || 30, DUR = project.duration;
-  const all = project.beats; all.forEach(b => b.els.forEach((e, i) => { e._k = b.id + ':' + i; }));
+  const all = project.beats; all.forEach(b => b.els.forEach((e, i) => { e._k = e._uid ? 'u:' + e._uid : b.id + ':' + i; }));
+  /* layer order (back → front) the user set on the timeline; new layers go on top */
+  const ORDER = ((project.review && project.review.layers && project.review.layers.order) || []);
+  const rank = e => { const i = ORDER.indexOf(e._k); return i < 0 ? 1e6 : i; };
+  const live = all.flatMap(b => b.els.filter(e => !e._del));
+  const byRank = list => list.map((e, j) => [e, j]).sort((a, b) => (rank(a[0]) - rank(b[0])) || (a[1] - b[1])).map(x => x[0]);
+  const bgEls = byRank(live.filter(e => e.bg)), fgEls = byRank(live.filter(e => !e.bg));
   const v = document.createElement('video');
   v.src = src || ''; v.preload = 'auto'; v.playsInline = true;
   el.appendChild(v);
@@ -45,9 +52,9 @@ export function createPreview(host, project, src) {
     const tr = /translate:\s*(-?[\d.]+)cqw\s+(-?[\d.]+)cqw/.exec(e.pos || ''), sc = /(?:^|;)\s*scale:\s*([\d.]+)/.exec(e.pos || '');
     base[e._k] = { x: tr ? +tr[1] : 0, y: tr ? +tr[2] : 0, s: sc ? +sc[1] : 1 }; };
   if (scs.length) { sbg = document.createElement('div'); sbg.className = 'scenebg'; el.appendChild(sbg); }
-  all.forEach(b => b.els.forEach(e => { if (e.bg) mk(e); }));
+  bgEls.forEach(mk);
   if (scs.length) { pc = document.createElement('canvas'); pc.className = 'person'; pc.width = 640; pc.height = 360; el.appendChild(pc); pctx = pc.getContext('2d'); scs.forEach(b => loadMatte(b.scene, () => render(time()))); }
-  all.forEach(b => b.els.forEach(e => { if (!e.bg) mk(e); }));
+  fgEls.forEach(mk);
   const baseCams = all.flatMap(b => b.cam || []);
   /* your Zoom/Pan keys replace Claude's camera inside the beats where you set them (blur / darkening kept) */
   function camsNow() {
@@ -115,5 +122,5 @@ export function createPreview(host, project, src) {
   v.addEventListener('loadedmetadata', () => { v.currentTime = toSrc(Math.min(2, DUR / 2)); });
   applyMoves(); render(0);
   function refresh() { ovs.forEach(([, d]) => d.classList.remove('on')); void el.offsetWidth; lt = undefined; render(time()); }
-  return { video: v, render, refresh, playFrom, seek, time, toSrc, cuts, byK, frame: el, applyMoves, camsNow, base };
+  return { video: v, render, refresh, playFrom, seek, time, toSrc, cuts, byK, frame: el, applyMoves, camsNow, base, zOrder: { bg: bgEls.map(e => e._k), fg: fgEls.map(e => e._k) } };
 }

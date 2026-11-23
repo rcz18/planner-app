@@ -6,7 +6,7 @@ const fmtS = t => t.toFixed(2) + ' s';
 const AUDIO = new Map();   // decoded audio of the last source file, shared by every sequence
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, onMedia } = {}) {
+export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, onMedia, onLayers, onDelete, onAddLayer, status } = {}) {
   const v = pv.video, BEATS = project.beats, W = project.words || [], DUR = project.duration;
   project.timeline = project.timeline || {};
   box.innerHTML = `
@@ -14,14 +14,22 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     <button type="button" class="tlBtn tlPlay" title="Play / pause (Space)">▶</button>
     <button type="button" class="tlBtn tlStep" data-d="-1" title="1 frame back (←)">◀︎|</button>
     <button type="button" class="tlBtn tlStep" data-d="1" title="1 frame forward (→)">|▶︎</button>
+    <button type="button" class="tlBtn tlGuide" title="Safe margins and center (G)" aria-pressed="false"><svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><rect x=".75" y=".75" width="14.5" height="10.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="3.5" y="3" width="9" height="6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M8 4.6v2.8M6.6 6h2.8" stroke="currentColor" stroke-width="1"/></svg></button>
     <span class="tlTC">00:00:00:00</span><span class="tlDur">/ ${fmtTC(DUR)}</span>
     <span class="tlSep"></span>
     <button type="button" class="tlBtn tlSnap on" title="Snapping (S)">🧲 Snap</button>
     <button type="button" class="tlBtn tlUndo" title="Undo your last change (Ctrl+Z)">↶ Undo</button>
     <button type="button" class="tlBtn tlReset" disabled title="Put the selected clip back where Claude had it">Reset clip</button>
     <button type="button" class="tlBtn tlResetAll" title="Undo every timing change">Reset all</button>
+    <span class="tlSep"></span>
+    <button type="button" class="tlBtn tlUp" disabled title="Move the selected layer up, in front (Alt+↑)">▲ Up</button>
+    <button type="button" class="tlBtn tlDown" disabled title="Move the selected layer down, behind (Alt+↓)">▼ Down</button>
+    <button type="button" class="tlBtn tlDel" disabled title="Delete the selected layer (Delete / Backspace)">🗑</button>
     <span class="tlSel"></span><span class="tlGrow"></span>
     <label class="tlZoom">− <input type="range" min="0" max="100" value="0" aria-label="Timeline zoom"> +</label>
+    <span class="tlAddWrap"><button type="button" class="tlBtn tlAdd" title="Add a layer at the playhead">＋ Layer</button>
+      <span class="tlAddMenu" hidden><button type="button" data-add="text">T&nbsp; Text layer</button><button type="button" data-add="media">🖼&nbsp; Photo / video</button>
+        <span class="tlAddText" hidden><input type="text" placeholder="Type the text, then Enter"><button type="button" data-add="ok">Add</button></span></span></span>
   </div>
   <div class="tlBody"><div class="tlHeads"></div><div class="tlScroll"><div class="tlInner"><div class="tlPH"><i></i></div></div></div></div>`;
   const heads = box.querySelector('.tlHeads'), scroll = box.querySelector('.tlScroll'), inner = box.querySelector('.tlInner'), ph = box.querySelector('.tlPH');
@@ -30,11 +38,11 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const labelOf = e => { const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); let s = (t.textContent || '').replace(/\s+/g, ' ').trim(); if (!s) s = 'FX · ' + ((e.cls || 'graphic').split(' ')[0]); return s.length > 34 ? s.slice(0, 33) + '…' : s; };
   const clips = [];
   BEATS.forEach(b => b.els.forEach((e, i) => {
-    if (e.in === undefined || e.out === undefined) return;
+    if (e.in === undefined || e.out === undefined || e._del) return;
     const d = pv.byK[e._k];
     const inner_ = d ? [...d.querySelectorAll('[data-show],[data-glow]')].map(n => ({ n, show: n.dataset.show, glow: n.dataset.glow })) : [];
     const o = { in: e.in, out: Math.min(e.out, DUR), fly: e.fly };
-    const c = { k: e._k, beat: b.id, i, e, d, bg: !!e.bg, label: labelOf(e), o, inner: inner_, st: { in: o.in, out: o.out, off: 0 } };
+    const c = { k: e._k, beat: b.id, i, e, d, bg: !!e.bg, user: !!e._uid, label: labelOf(e), o, inner: inner_, st: { in: o.in, out: o.out, off: 0 } };
     const saved = project.timeline[e._k]; if (saved) c.st = { in: +saved.in, out: +saved.out, off: +(saved.off || 0) };
     clips.push(c); apply(c);
   }));
@@ -43,8 +51,15 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const changed = c => Math.abs(c.st.in - c.o.in) > .004 || Math.abs(c.st.out - c.o.out) > .004;
   function commit(c) { if (changed(c)) project.timeline[c.k] = { in: +c.st.in.toFixed(3), out: +c.st.out.toFixed(3), off: +c.st.off.toFixed(3) }; else delete project.timeline[c.k]; onChange && onChange(); }
 
-  function pack(list) { const lanes = []; list.slice().sort((a, b) => a.o.in - b.o.in).forEach(c => { let L = lanes.find(l => l.end <= c.o.in + 1e-3); if (!L) { L = { end: 0, clips: [] }; lanes.push(L); } L.clips.push(c); L.end = c.o.out; }); return lanes; }
-  const gL = pack(clips.filter(c => !c.bg)), sL = pack(clips.filter(c => c.bg));
+  /* layers: a clip that is in front of another one (at the same time) always sits on a higher track, like Premiere */
+  const Z = pv.zOrder || { bg: [], fg: [] };
+  const zList = bg => { const ks = bg ? Z.bg : Z.fg; return clips.filter(c => c.bg === bg).sort((a, b) => ks.indexOf(a.k) - ks.indexOf(b.k)); };
+  const overlap = (a, b) => a.st.in < b.st.out - 1e-3 && b.st.in < a.st.out - 1e-3;
+  function pack(list) { const lanes = [], at = new Map();
+    list.forEach((c, j) => { let L = 0; for (let q = 0; q < j; q++) if (overlap(list[q], c)) L = Math.max(L, at.get(list[q]) + 1);
+      at.set(c, L); (lanes[L] ||= { clips: [] }).clips.push(c); });
+    return lanes.filter(Boolean); }
+  const gL = pack(zList(false)), sL = pack(zList(true));
   const TR = [{ id: 'beats', name: 'Beats', cls: 'trBeats', h: 22 }, { id: 'words', name: 'Words', cls: 'trWords', h: 20 }];
   const nV = gL.length + sL.length + 1;
   gL.slice().reverse().forEach((L, j) => TR.push({ id: 'g' + j, name: 'V' + (nV - j), sub: 'Text / anim', cls: 'trG', h: 24, lane: L }));
@@ -52,8 +67,18 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   TR.splice(2, 0, { id: 'mine', name: 'Yours', sub: 'Photo / video', cls: 'trM', h: 24 });
   TR.push({ id: 'video', name: 'V1', sub: 'Video', cls: 'trV', h: 42 }, { id: 'cam', name: 'Cam', sub: 'Zoom / pan', cls: 'trC', h: 22 }, { id: 'audio', name: 'A1', sub: 'Audio', cls: 'trA', h: 38 });
   const RULER = 24;
-  heads.innerHTML = `<div class="thd thRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="thd ${t.cls}" style="height:${t.h}px"><b>${t.name}</b>${t.sub ? `<small>${t.sub}</small>` : ''}</div>`).join('');
-  inner.insertAdjacentHTML('afterbegin', `<div class="tlRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="tlLane ${t.cls}" data-tr="${t.id}" style="height:${t.h}px"></div>`).join(''));
+  /* track lock (like Premiere): a locked track's clips cannot be picked, moved or deleted */
+  const LKEY = 'planner-locks:' + (project.id || '') + ':' + DUR;
+  const locks = new Set((() => { try { return JSON.parse(localStorage.getItem(LKEY) || '[]'); } catch (e) { return []; } })());
+  const lockable = t => !!t.lane || t.id === 'mine';
+  heads.innerHTML = `<div class="thd thRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="thd ${t.cls}${locks.has(t.id) ? ' lk' : ''}" data-tr="${t.id}" style="height:${t.h}px"><b>${t.name}</b>${t.sub ? `<small>${t.sub}</small>` : ''}${lockable(t) ? `<button type="button" class="tLock" data-lock="${t.id}" title="Lock / unlock this track" aria-pressed="${locks.has(t.id)}">${locks.has(t.id) ? '🔒' : '🔓'}</button>` : ''}</div>`).join('');
+  const trackOf = k => { if (String(k).startsWith('m:')) return 'mine'; const t = TR.find(x => x.lane && x.lane.clips.some(c => c.k === k)); return t ? t.id : null; };
+  const isLocked = k => locks.has(trackOf(k));
+  heads.addEventListener('click', ev => { const b = ev.target.closest('.tLock'); if (!b) return; const id = b.dataset.lock;
+    if (locks.has(id)) locks.delete(id); else locks.add(id); try { localStorage.setItem(LKEY, JSON.stringify([...locks])); } catch (e) {}
+    const on = locks.has(id); b.textContent = on ? '🔒' : '🔓'; b.setAttribute('aria-pressed', on); b.closest('.thd').classList.toggle('lk', on); lane(id)?.classList.toggle('lk', on);
+    if (on && sel && trackOf(sel.k) === id) select(null); if (on && id === 'mine') { msel = null; } draw(); });
+  inner.insertAdjacentHTML('afterbegin', `<div class="tlRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="tlLane ${t.cls}${locks.has(t.id) ? ' lk' : ''}" data-tr="${t.id}" style="height:${t.h}px"></div>`).join(''));
   const ruler = inner.querySelector('.tlRuler'), lane = id => inner.querySelector(`.tlLane[data-tr="${id}"]`);
 
   let pps = 100, sel = null, msel = null, mdr = null;
@@ -66,7 +91,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function drawRuler() { const steps = [0.1, 0.2, 0.5, 1, 2, 5]; const step = steps.find(s => s * pps >= 46) || 5, minor = step / 5; let h = '';
     for (let k = 0; k * minor <= DUR + 1e-6; k++) { const t = k * minor, maj = k % 5 === 0; h += `<i class="${maj ? 'maj' : ''}" style="left:${t * pps}px"></i>`; if (maj) h += `<span style="left:${t * pps}px">${fmtTC(t).slice(6)}</span>`; }
     ruler.innerHTML = h; }
-  const clipHTML = c => `<div class="clip ${c.bg ? 'cS' : 'cG'}${sel === c ? ' sel' : ''}${changed(c) ? ' moved' : ''}" data-k="${c.k}" style="left:${c.st.in * pps}px;width:${Math.max(4, (c.st.out - c.st.in) * pps)}px" title="${esc(c.label)} · ${c.beat} · ${fmtS(c.st.in)} → ${fmtS(c.st.out)}"><i class="hl"></i><span>${esc(c.label)}</span><i class="hr"></i></div>`;
+  const clipHTML = c => `<div class="clip ${c.bg ? 'cS' : 'cG'}${c.user ? ' cU' : ''}${sel === c ? ' sel' : ''}${changed(c) ? ' moved' : ''}" data-k="${c.k}" style="left:${c.st.in * pps}px;width:${Math.max(4, (c.st.out - c.st.in) * pps)}px" title="${esc(c.label)} · ${c.beat} · ${fmtS(c.st.in)} → ${fmtS(c.st.out)}"><i class="hl"></i><span>${esc(c.label)}</span><i class="hr"></i></div>`;
   function draw() {
     inner.style.width = (DUR * pps + 40) + 'px'; drawRuler();
     lane('beats').innerHTML = BEATS.map((b, j) => `<div class="bt b${j % 4}" style="left:${b.t0 * pps}px;width:${(Math.min(b.t1, DUR) - b.t0) * pps}px" title="${esc(b.title)}"><span>${b.id} · ${b.kind || ''}</span></div>`).join('');
@@ -139,8 +164,9 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     if (drag.mode === 'l') seek(c.st.in + 0.02); else if (drag.mode === 'r') seek(Math.max(0, c.st.out - 0.04)); else pv.refresh();
     showSel(); });
   inner.addEventListener('pointerup', () => { if (drag && drag.moved) { pv.refresh(); draw(); commit(drag.c); } drag = null; });
-  function select(c) { sel = c; Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); if (c && c.d) c.d.classList.add('pa-sel'); inner.querySelectorAll('.clip.sel').forEach(x => x.classList.remove('sel')); if (c) inner.querySelector(`.clip[data-k="${c.k}"]`)?.classList.add('sel'); showSel(); onSelect && onSelect(c); }
-  function showSel() { const r = box.querySelector('.tlReset'); if (!sel) { selEl.textContent = ''; r.disabled = true; return; } r.disabled = false;
+  function select(c) { sel = c; if (c) msel = null; Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); if (c && c.d) c.d.classList.add('pa-sel'); inner.querySelectorAll('.clip.sel').forEach(x => x.classList.remove('sel')); if (c) inner.querySelector(`.clip[data-k="${c.k}"]`)?.classList.add('sel'); showSel(); onSelect && onSelect(c); }
+  function showSel() { const r = box.querySelector('.tlReset'); upB.disabled = downB.disabled = !sel; delB.disabled = !sel && !msel;
+    if (!sel) { selEl.textContent = msel ? 'Your photo/video selected' : ''; r.disabled = true; return; } r.disabled = false;
     selEl.innerHTML = `<b>${esc(sel.label)}</b> · ${sel.beat} · ${fmtS(sel.st.in)} → ${fmtS(sel.st.out)} (${(sel.st.out - sel.st.in).toFixed(2)} s)${changed(sel) ? ' <em>changed</em>' : ''}`; }
   function resetClip(c) { undo.push({ c, st: { ...c.st } }); c.st = { in: c.o.in, out: c.o.out, off: 0 }; apply(c); commit(c); }
   box.querySelector('.tlReset').onclick = () => { if (sel) { resetClip(sel); pv.refresh(); draw(); showSel(); } };
@@ -148,6 +174,9 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function doUndo() { if (onUndo) { onUndo(); return; } const u = undo.pop(); if (!u) return; u.c.st = u.st; apply(u.c); commit(u.c); pv.refresh(); draw(); select(u.c); }
   box.querySelector('.tlUndo').onclick = doUndo;
   function onKey(ev) { const tg = ev.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
+    if (ev.altKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) { if (sel) { ev.preventDefault(); moveLayer(ev.key === 'ArrowUp' ? 1 : -1); } return; }
+    if ((ev.key === 'Delete' || ev.key === 'Backspace') && !ev.ctrlKey && !ev.metaKey) { if (sel || msel) { ev.preventDefault(); deleteSel(); } return; }
+    if (ev.key.toLowerCase() === 'g' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { setGuides(!guides); return; }
     if (ev.code === 'Space') { ev.preventDefault(); togglePlay(); }
     else if (ev.key === 'ArrowLeft') { ev.preventDefault(); seek(Math.round(now() * FPS - (ev.shiftKey ? FPS : 1)) / FPS); }
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); seek(Math.round(now() * FPS + (ev.shiftKey ? FPS : 1)) / FPS); }
@@ -160,13 +189,13 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const ro = new ResizeObserver(() => setZoom(+zoomIn.value)); ro.observe(scroll);
   setZoom(0); pv.refresh();
 
-  const changesText = bid => { const ch = clips.filter(c => c.beat === bid && changed(c)); if (!ch.length) return '';
+  const changesText = bid => { const ch = clips.filter(c => c.beat === bid && !c.user && changed(c)); if (!ch.length) return '';
     return ' · timeline (apply exactly): ' + ch.map(c => `el#${c.i} “${c.label}” in ${c.o.in.toFixed(2)}→${c.st.in.toFixed(2)} s, out ${c.o.out.toFixed(2)}→${c.st.out.toFixed(2)} s${Math.abs(c.st.off) > .004 ? ' (whole clip moved)' : ''}`).join('; '); };
   /* your photos / videos (suggestions for Claude): one lane, drag to move, drag the edges to trim */
   function drawMine() { const L = lane('mine'); if (!L) return;
     L.innerHTML = mineList().map(m => `<div class="clip cM${msel === m.id ? ' sel' : ''}" data-m="${esc(m.id)}" style="left:${m.t0 * pps}px;width:${Math.max(4, (m.t1 - m.t0) * pps)}px" title="${esc(m.name || '')} · ${fmtS(m.t0)} → ${fmtS(m.t1)}"><i class="hl"></i><span>${m.type === 'video' ? '🎞' : '🖼'} ${esc(m.name || 'media')}</span><i class="hr"></i></div>`).join(''); }
   inner.addEventListener('pointerdown', ev => { const el = ev.target.closest('.clip.cM'); if (!el) return; ev.preventDefault(); const m = mineList().find(x => x.id === el.dataset.m); if (!m) return;
-    msel = m.id; onMedia && onMedia('select', m); mdr = { m, mode: ev.target.classList.contains('hl') ? 'l' : ev.target.classList.contains('hr') ? 'r' : 'm', x0: ev.clientX, a: m.t0, b: m.t1, moved: false }; inner.setPointerCapture(ev.pointerId); drawMine(); });
+    msel = m.id; select(null); onMedia && onMedia('select', m); mdr = { m, mode: ev.target.classList.contains('hl') ? 'l' : ev.target.classList.contains('hr') ? 'r' : 'm', x0: ev.clientX, a: m.t0, b: m.t1, moved: false }; inner.setPointerCapture(ev.pointerId); drawMine(); });
   inner.addEventListener('pointermove', ev => { if (!mdr) return; const dt = (ev.clientX - mdr.x0) / pps; if (!mdr.moved && Math.abs(ev.clientX - mdr.x0) < 3) return; mdr.moved = true;
     const m = mdr.m, len = mdr.b - mdr.a;
     if (mdr.mode === 'm') { const a = Math.max(0, Math.min(DUR - len, snapT(mdr.a + dt))); m.t0 = +a.toFixed(3); m.t1 = +(a + len).toFixed(3); }
@@ -174,7 +203,47 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     else m.t1 = +Math.min(DUR, Math.max(mdr.a + 0.1, snapT(mdr.b + dt))).toFixed(3);
     drawMine(); seek(mdr.mode === 'r' ? Math.max(0, m.t1 - 0.04) : m.t0 + 0.02); onMedia && onMedia('move', m); });
   inner.addEventListener('pointerup', () => { if (mdr && mdr.moved) onChange && onChange(); mdr = null; });
+  /* ---------- layers: up / down, delete, add ---------- */
+  const upB = box.querySelector('.tlUp'), downB = box.querySelector('.tlDown'), delB = box.querySelector('.tlDel');
+  const say = m => { if (status) status(m); else selEl.textContent = m; };
+  function moveLayer(dir) { if (!sel || !onLayers) return; if (isLocked(sel.k)) { say('That track is locked'); return; }
+    const L = zList(sel.bg), i = L.indexOf(sel);
+    const others = dir > 0 ? L.slice(i + 1).filter(c => overlap(c, sel)) : L.slice(0, i).filter(c => overlap(c, sel)).reverse();
+    const n = others.find(c => !isLocked(c.k)) || others[0];
+    if (!n) { say(dir > 0 ? `“${sel.label}” is already on top` : `“${sel.label}” is already at the bottom`); return; }
+    const rest = L.filter(c => c !== sel), j = rest.indexOf(n); rest.splice(dir > 0 ? j + 1 : j, 0, sel);
+    const other = zList(!sel.bg), bgL = sel.bg ? rest : other, fgL = sel.bg ? other : rest;
+    onLayers([...bgL, ...fgL].map(c => c.k), sel.k); }
+  function deleteSel() { if (!onDelete) return;
+    if (sel) { if (isLocked(sel.k)) { say('That track is locked'); return; } const k = sel.k; select(null); onDelete(k); return; }
+    if (msel) { if (locks.has('mine')) { say('That track is locked'); return; } const k = 'm:' + msel; msel = null; onDelete(k); } }
+  if (!onLayers) [upB, downB, delB, box.querySelector('.tlAddWrap')].forEach(x => { if (x) x.hidden = true; });
+  upB.onclick = () => moveLayer(1); downB.onclick = () => moveLayer(-1); delB.onclick = deleteSel;
+  const addB = box.querySelector('.tlAdd'), addM = box.querySelector('.tlAddMenu'), addT = box.querySelector('.tlAddText'), addI = addT.querySelector('input');
+  const closeAdd = () => { addM.hidden = true; addT.hidden = true; addI.value = ''; };
+  addB.onclick = () => { if (addM.hidden) { addM.hidden = false; addT.hidden = true; } else closeAdd(); };
+  addM.addEventListener('click', ev => { const a = ev.target.closest('[data-add]'); if (!a) return; const k = a.dataset.add;
+    if (k === 'text') { addT.hidden = false; addI.focus(); return; }
+    if (k === 'media') { closeAdd(); onAddLayer && onAddLayer('media', null, now()); return; }
+    if (k === 'ok') { const t = addI.value.trim(); if (!t) { addI.focus(); return; } closeAdd(); onAddLayer && onAddLayer('text', t, now()); } });
+  addI.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') addM.querySelector('[data-add="ok"]').click(); else if (ev.key === 'Escape') closeAdd(); });
+  const onDocDown = ev => { if (!addM.hidden && !ev.target.closest('.tlAddWrap')) closeAdd(); }; document.addEventListener('pointerdown', onDocDown);
+  /* ---------- safe margins + center (Premiere's safe margins) ---------- */
+  const GKEY = 'planner-guides'; let guides = false; const gBtn = box.querySelector('.tlGuide');
+  const gRoot = pv.frame.getRootNode(), gEl = document.createElement('div'); gEl.className = 'pa-guides'; gEl.innerHTML = '<i class="gA"></i><i class="gT"></i><i class="gH"></i><i class="gV"></i>';
+  if (gRoot && gRoot.querySelector && !gRoot.querySelector('style.pa-gst')) { const gs = document.createElement('style'); gs.className = 'pa-gst';
+    gs.textContent = `.pa-guides{position:absolute;inset:0;z-index:60;pointer-events:none;display:none}.pa-guides.on{display:block}
+    .pa-guides i{position:absolute;box-sizing:border-box}.pa-guides .gA{inset:5%;border:1px solid rgba(255,255,255,.75)}.pa-guides .gT{inset:10%;border:1px solid rgba(255,255,255,.55)}
+    .pa-guides .gH{left:47%;right:47%;top:50%;height:0;border-top:1px solid rgba(255,255,255,.85)}.pa-guides .gV{top:46.5%;bottom:46.5%;left:50%;width:0;border-left:1px solid rgba(255,255,255,.85)}
+    .pa-guides i{filter:drop-shadow(0 0 1px rgba(0,0,0,.9))}`; gRoot.appendChild(gs); }
+  pv.frame.appendChild(gEl);
+  function setGuides(on) { guides = on; gEl.classList.toggle('on', on); gBtn.classList.toggle('on', on); gBtn.setAttribute('aria-pressed', on); try { localStorage.setItem(GKEY, on ? '1' : ''); } catch (e) {} }
+  gBtn.onclick = () => setGuides(!guides);
+  setGuides((() => { try { return localStorage.getItem(GKEY) === '1'; } catch (e) { return false; } })());
+
   /* re-read your timeline edits after an undo */
   function sync() { clips.forEach(c => { const s = project.timeline[c.k]; c.st = s ? { in: +s.in, out: +s.out, off: +(s.off || 0) } : { in: c.o.in, out: c.o.out, off: 0 }; apply(c); }); pv.refresh(); draw(); showSel(); }
-  return { seek, togglePlay, changesText, sync, redraw: () => draw(), now, selectMedia: id => { msel = id; drawMine(); }, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); } };
+  return { seek, togglePlay, changesText, sync, redraw: () => draw(), now, isLocked, deleteSel,
+    selectKey: k => { const c = clips.find(x => x.k === k); if (c) { select(c); const el = inner.querySelector(`.clip[data-k="${CSS.escape(k)}"]`); if (el) { const x = el.offsetLeft; if (x < scroll.scrollLeft || x > scroll.scrollLeft + scroll.clientWidth - 40) scroll.scrollLeft = x - 60; el.scrollIntoView({ block: 'nearest' }); } } },
+    selectMedia: id => { msel = id; if (id) select(null); drawMine(); showSel(); }, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); gEl.remove(); document.removeEventListener('pointerdown', onDocDown); } };
 }

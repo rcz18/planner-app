@@ -1,9 +1,9 @@
 /* Preview tools: Move / Resize, Zoom / Pan (your camera keys), Draw (+ comment), Dictate. */
-import { camAt } from './engine.js?v=16.5';
+import { camAt } from './engine.js?v=17.2';
 const FPS = 30;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, mediaSrc }) {
+export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, mediaSrc, onDelete }) {
   const R = P.review; R.moves ||= {}; R.cams ||= []; R.drawings ||= []; R.media ||= [];
   const root = host.shadowRoot, fr = pv.frame, v = pv.video;
   const st = document.createElement('style');
@@ -74,6 +74,13 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.s = +s.toFixed(3); R.moves[sel] = m; pv.applyMoves(); }
     placeBox(); paintHint(); }
   function nudge(dx, dy) { if (!sel || bar.hidden) return; if (isM(sel)) { const m = mEntry(sel); m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); renderMedia(); } else { const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; m.x = +(m.x + dx).toFixed(2); m.y = +(m.y + dy).toFixed(2); R.moves[sel] = m; pv.applyMoves(); } placeBox(); paintHint(); }
+  /* center the selected text / popup in the frame (left-right, top-bottom or both) */
+  function centerSel(h, vv) { if (!sel || bar.hidden) return; const el = elOf(sel); if (!el) return; const f = fr.getBoundingClientRect();
+    const rs = (isM(sel) ? [] : [...el.children].filter(n => n.getAttribute('aria-hidden') !== 'true' && n.tagName !== 'STYLE')).map(n => n.getBoundingClientRect()).filter(q => q.width && q.height);
+    const r = rs.length ? { l: Math.min(...rs.map(q => q.left)), r: Math.max(...rs.map(q => q.right)), t: Math.min(...rs.map(q => q.top)), b: Math.max(...rs.map(q => q.bottom)) }
+      : (q => ({ l: q.left, r: q.right, t: q.top, b: q.bottom }))(el.getBoundingClientRect());
+    const dx = h ? (f.left + f.width / 2) - (r.l + r.r) / 2 : 0, dy = vv ? (f.top + f.height / 2) - (r.t + r.b) / 2 : 0;
+    if (Math.abs(dx) < .5 && Math.abs(dy) < .5) return; nudge(cqw(dx), cqw(dy)); changed(); }
   const label = k => { if (isM(k)) { const m = mEntry(k); return 'your ' + (m && m.type === 'video' ? 'video' : 'photo') + (m && m.name ? ' ' + m.name : ''); } const d = pv.byK[k]; const c = d.cloneNode(true); c.querySelectorAll('[aria-hidden="true"],svg').forEach(x => x.remove()); return (c.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30) || 'graphic'; };
   function pick(k) { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sel = k; if (k && !isM(k) && pv.byK[k]) pv.byK[k].classList.add('pa-sel'); if (isM(k)) tl.selectMedia && tl.selectMedia(k.slice(2)); paintHint(); placeBox(); }
   root.addEventListener('pointerdown', ev => {
@@ -81,9 +88,13 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     if (mode === 'move') { const path = ev.composedPath(); const hnd = path.find(n => n.dataset && n.dataset.c && n.parentNode === box);
       if (hnd && sel) { ev.preventDefault(); const r = elOf(sel).getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         rdrag = { cx, cy, d0: Math.max(4, Math.hypot(ev.clientX - cx, ev.clientY - cy)), s0: scaleOf(sel) }; hnd.setPointerCapture(ev.pointerId); return; }
-      const md = path.find(n => n.classList && n.classList.contains('pa-media'));
+      /* topmost text / animation / photo under the pointer that is not on a locked track */
+      const unlocked = k => !(tl && tl.isLocked && tl.isLocked(k)); let md = null, d = null;
+      const stack = root.elementsFromPoint ? root.elementsFromPoint(ev.clientX, ev.clientY) : path;
+      for (const n of stack) { if (!n || !n.closest) continue; const mm = n.closest('.pa-media'); if (mm) { if (mm.classList.contains('on') && unlocked('m:' + mm.dataset.m)) { md = mm; break; } continue; }
+        const o = n.closest('.ov'); if (o && o.classList.contains('on') && unlocked(o.dataset.k)) { d = o; break; } }
       if (md) { ev.preventDefault(); pick('m:' + md.dataset.m); const m = mEntry(sel); mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { x: m.x, y: m.y } }; md.setPointerCapture(ev.pointerId); return; }
-      const d = path.find(n => n.classList && n.classList.contains('ov')); if (!d) { pick(null); return; }
+      if (!d) { pick(null); return; }
       ev.preventDefault(); pick(d.dataset.k); const m = R.moves[sel] || { x: 0, y: 0, s: 1 }; mdrag = { x0: ev.clientX, y0: ev.clientY, m0: { x: Number.isFinite(+m.x) ? +m.x : 0, y: Number.isFinite(+m.y) ? +m.y : 0, s: Number.isFinite(+m.s) && m.s > 0 ? +m.s : 1 } }; d.setPointerCapture(ev.pointerId); }
     else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); cdrag = { x0: ev.clientX, y0: ev.clientY, k0: { ...k }, k }; fr.setPointerCapture(ev.pointerId); }
   });
@@ -113,12 +124,13 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
       if (!sel) { hint.textContent = 'Click a text, animation or your photo/video on the paused frame to move or resize it.'; return; }
       const pct = Math.round(scaleOf(sel) * 100);
       if (hint._sel === sel && hint.contains(document.activeElement)) { const bb = hint.querySelector('.szc b'); if (bb) bb.textContent = pct + '%'; const rg = hint.querySelector('.szc input'); if (rg && document.activeElement !== rg) rg.value = pct; return; }
-      hint._sel = sel; const szc = `<span class="szc"><button type="button" data-h="mdown" title="Smaller (−)">−</button><input type="range" data-h="mrange" min="20" max="500" step="1" value="${pct}"><button type="button" data-h="mup" title="Bigger (+)">+</button><b>${pct}%</b></span>`;
+      hint._sel = sel; const aln = `<span class="aln" title="Center in the frame"><button type="button" data-h="cx" title="Center left-right">⇔ Center</button><button type="button" data-h="cy" title="Center top-bottom">⇕ Middle</button><button type="button" data-h="cc" title="Center both ways">✛ Both</button></span>`;
+      const szc = `<span class="szc"><button type="button" data-h="mdown" title="Smaller (−)">−</button><input type="range" data-h="mrange" min="20" max="500" step="1" value="${pct}"><button type="button" data-h="mup" title="Bigger (+)">+</button><b>${pct}%</b></span>`;
       if (isM(sel)) { const m = mEntry(sel); if (!m) { sel = null; hint.textContent = ''; return; }
-        hint.innerHTML = `<b>${esc(label(sel))}</b> ${m.t0.toFixed(2)}–${m.t1.toFixed(2)} s: drag to move · corners resize · trim it on the “Yours” track ${szc}
+        hint.innerHTML = `<b>${esc(label(sel))}</b> ${m.t0.toFixed(2)}–${m.t1.toFixed(2)} s: drag to move · corners resize · trim it on the “Yours” track ${szc}${aln}
           <input type="text" class="mnote" data-h="mnote" placeholder="What should Claude do with it?" value="${esc(m.note || '')}"> <button type="button" data-h="mdel">Delete</button>`; return; }
       const m = R.moves[sel];
-      hint.innerHTML = `Moving <b>${esc(label(sel))}</b>: drag to move · drag an orange corner to resize · arrows nudge · + / − size ${szc}${m ? ` · x ${m.x >= 0 ? '+' : ''}${m.x} y ${m.y >= 0 ? '+' : ''}${m.y} <button type="button" data-h="mreset">Reset</button>` : ''}`; }
+      hint.innerHTML = `Moving <b>${esc(label(sel))}</b>: drag to move · drag an orange corner to resize · arrows nudge · + / − size ${szc}${aln}${m ? ` · x ${m.x >= 0 ? '+' : ''}${m.x} y ${m.y >= 0 ? '+' : ''}${m.y} <button type="button" data-h="mreset">Reset</button>` : ''}`; }
     else if (mode === 'cam') { hint._sel = null; const t = tNow(), k = R.cams.find(x => Math.abs(x.t - t) < 0.5 / FPS), b = beatAt(t), n = R.cams.filter(x => x.t >= b.t0 && x.t < b.t1).length;
       hint.innerHTML = `Camera at ${t.toFixed(2)} s: scroll to zoom · drag to pan${k ? ` · zoom ${Math.round(k.s * 100)}% <button type="button" data-h="cdel">Remove this key</button>` : ''}${n ? ` · ${n} key${n > 1 ? 's' : ''} in ${b.id} (yours replace Claude’s camera there) <button type="button" data-h="cclear">Clear ${b.id}</button>` : ''}`; }
     else if (mode === 'draw') { hint._sel = null; hint.textContent = 'Draw on the frame, write what you want, then Save.'; }
@@ -126,9 +138,10 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   }
   hint.onclick = e => { const a = e.target.dataset && e.target.dataset.h; if (!a) return;
     if (a === 'mrange' || a === 'mnote') return;
+    if (a === 'cx' || a === 'cy' || a === 'cc') { centerSel(a !== 'cy', a !== 'cx'); return; }
     if (a === 'mup' && sel) { setScale(scaleOf(sel) * 1.1); changed(); return; }
     if (a === 'mdown' && sel) { setScale(scaleOf(sel) / 1.1); changed(); return; }
-    if (a === 'mdel' && isM(sel)) { R.media.splice(R.media.indexOf(mEntry(sel)), 1); sel = null; hint._sel = null; renderMedia(); tl.redraw(); placeBox(); paintHint(); changed(); return; }
+    if (a === 'mdel' && isM(sel)) { const k = sel; sel = null; hint._sel = null; if (onDelete) { onDelete(k); return; } R.media.splice(R.media.indexOf(mEntry(k)), 1); renderMedia(); tl.redraw(); placeBox(); paintHint(); changed(); return; }
     if (a === 'mreset' && sel && !isM(sel)) { delete R.moves[sel]; pv.applyMoves(); placeBox(); }
     if (a === 'cdel') { const t = tNow(); R.cams = R.cams.filter(x => Math.abs(x.t - t) >= 0.5 / FPS); P.review.cams = R.cams; }
     if (a === 'cclear') { const b = beatAt(tNow()); R.cams = R.cams.filter(x => !(x.t >= b.t0 && x.t < b.t1)); P.review.cams = R.cams; }
@@ -176,6 +189,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   function onKey(e) { const tg = e.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return; if (e.ctrlKey || e.metaKey) return;
     const k = e.key.toLowerCase();
     if (k === 'm') setMode('move'); else if (k === 'z') setMode('cam'); else if (k === 'd') setMode('draw'); else if (k === 'escape' && mode) setMode(mode);
+    else if (mode === 'move' && sel && (e.key === 'Delete' || e.key === 'Backspace') && onDelete) { e.preventDefault(); e.stopImmediatePropagation(); const k = sel; pick(null); onDelete(k); }
     else if (mode === 'move' && sel && (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_')) { e.preventDefault(); e.stopImmediatePropagation(); setScale(scaleOf(sel) * (e.key === '-' || e.key === '_' ? 1 / 1.1 : 1.1)); changed(); }
     else if (mode === 'move' && sel && e.key.startsWith('Arrow')) { e.preventDefault(); e.stopImmediatePropagation(); const st = e.shiftKey ? 1 : 0.2;
       nudge(e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, e.key === 'ArrowUp' ? -st : e.key === 'ArrowDown' ? st : 0); changed(); } }
@@ -188,7 +202,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     R.drawings.filter(d => d.beat === bid).forEach(d => { s += ` · drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`; });
     return s; };
   renderMedia();
-  return { text, shot() { v.pause(); return snapshot(fr, root, v); }, idle() { if (mode) setMode(mode); }, sync() { pv.applyMoves(); renderMedia(); if (sel && !elOf(sel)) sel = null; hint._sel = null; placeBox(); paintHint(); pv.render(pv.time()); }, destroy() { mAlive = false; mediaEls.forEach(d => d.remove()); closeDraw(); box.remove(); window.removeEventListener('resize', placeBox); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
+  return { text, mode: () => mode, use(m) { if (mode !== m) setMode(m); }, pick(k) { if (k && elOf(k)) pick(k); }, shot() { v.pause(); return snapshot(fr, root, v); }, idle() { if (mode) setMode(mode); }, sync() { pv.applyMoves(); renderMedia(); if (sel && !elOf(sel)) sel = null; hint._sel = null; placeBox(); paintHint(); pv.render(pv.time()); }, destroy() { mAlive = false; mediaEls.forEach(d => d.remove()); closeDraw(); box.remove(); window.removeEventListener('resize', placeBox); document.removeEventListener('keydown', onKey, true); bar.innerHTML = ''; hint.textContent = ''; } };
 }
 
 /* a picture of the exact shot (video + graphics + your drawing), so Claude sees what you saw */
@@ -217,7 +231,7 @@ export async function snapshot(fr, root, v, sketch) {
         const im = document.createElement('img'); im.setAttribute('src', url); im.setAttribute('style', k.getAttribute('style') || ''); im.className = o.className;
         ['position', 'inset', 'object-fit', 'z-index', 'border-radius', 'box-shadow', 'display'].forEach(p => im.style.setProperty(p, cs.getPropertyValue(p), 'important'));
         if (!url) im.style.setProperty('display', 'none', 'important'); k.replaceWith(im); } });
-    clone.querySelectorAll('.pa-box,.pa-media .pa-h').forEach(x => x.remove()); clone.querySelectorAll('.pa-sel').forEach(x => x.classList.remove('pa-sel'));
+    clone.querySelectorAll('.pa-box,.pa-guides,.pa-media .pa-h').forEach(x => x.remove()); clone.querySelectorAll('.pa-sel').forEach(x => x.classList.remove('pa-sel'));
     clone.style.setProperty('width', rect.width + 'px', 'important'); clone.style.setProperty('height', rect.height + 'px', 'important');
     const css = [...root.querySelectorAll('style')].map(x => x.textContent).join('\n').replace(/:host\b/g, '.shotRoot');
     const wrap = document.createElement('div'); wrap.className = 'shotRoot'; wrap.setAttribute('style', `width:${rect.width}px;height:${rect.height}px;transform:scale(${W / rect.width});transform-origin:0 0;position:relative;overflow:hidden`);
