@@ -42,7 +42,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     const d = pv.byK[e._k];
     const inner_ = d ? [...d.querySelectorAll('[data-show],[data-glow]')].map(n => ({ n, show: n.dataset.show, glow: n.dataset.glow })) : [];
     const o = { in: e.in, out: Math.min(e.out, DUR), fly: e.fly };
-    const c = { k: e._k, beat: b.id, i, e, d, bg: !!e.bg, user: !!e._uid, label: labelOf(e), o, inner: inner_, st: { in: o.in, out: o.out, off: 0 } };
+    const c = { k: e._k, beat: b.id, i, e, d, bg: !!e.bg, user: !!e._uid, guide: /\bguide\b/.test(e.cls || ''), label: labelOf(e), o, inner: inner_, st: { in: o.in, out: o.out, off: 0 } };
     const saved = project.timeline[e._k]; if (saved) c.st = { in: +saved.in, out: +saved.out, off: +(saved.off || 0) };
     clips.push(c); apply(c);
   }));
@@ -73,7 +73,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const lockable = t => !!t.lane || t.id === 'mine';
   heads.innerHTML = `<div class="thd thRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="thd ${t.cls}${locks.has(t.id) ? ' lk' : ''}" data-tr="${t.id}" style="height:${t.h}px"><b>${t.name}</b>${t.sub ? `<small>${t.sub}</small>` : ''}${lockable(t) ? `<button type="button" class="tLock" data-lock="${t.id}" title="Lock / unlock this track" aria-pressed="${locks.has(t.id)}">${locks.has(t.id) ? '🔒' : '🔓'}</button>` : ''}</div>`).join('');
   const trackOf = k => { if (String(k).startsWith('m:')) return 'mine'; const t = TR.find(x => x.lane && x.lane.clips.some(c => c.k === k)); return t ? t.id : null; };
-  const isLocked = k => locks.has(trackOf(k));
+  const isLocked = k => { const c = clips.find(x => x.k === k); return (c && c.guide) || locks.has(trackOf(k)); };   // roto guides are always locked
   heads.addEventListener('click', ev => { const b = ev.target.closest('.tLock'); if (!b) return; const id = b.dataset.lock;
     if (locks.has(id)) locks.delete(id); else locks.add(id); try { localStorage.setItem(LKEY, JSON.stringify([...locks])); } catch (e) {}
     const on = locks.has(id); b.textContent = on ? '🔒' : '🔓'; b.setAttribute('aria-pressed', on); b.closest('.thd').classList.toggle('lk', on); lane(id)?.classList.toggle('lk', on);
@@ -81,7 +81,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   inner.insertAdjacentHTML('afterbegin', `<div class="tlRuler" style="height:${RULER}px"></div>` + TR.map(t => `<div class="tlLane ${t.cls}${locks.has(t.id) ? ' lk' : ''}" data-tr="${t.id}" style="height:${t.h}px"></div>`).join(''));
   const ruler = inner.querySelector('.tlRuler'), lane = id => inner.querySelector(`.tlLane[data-tr="${id}"]`);
 
-  let pps = 100, sel = null, msel = null, mdr = null;
+  let pps = 100, sel = null, sels = new Set(), msel = null, mdr = null;
   const mineList = () => ((project.review || {}).media || []);
   const fitPPS = () => Math.max(30, (scroll.clientWidth - 8) / DUR);
   const setZoom = z => { pps = fitPPS() * Math.pow(8, z / 100); draw(); };
@@ -91,7 +91,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function drawRuler() { const steps = [0.1, 0.2, 0.5, 1, 2, 5]; const step = steps.find(s => s * pps >= 46) || 5, minor = step / 5; let h = '';
     for (let k = 0; k * minor <= DUR + 1e-6; k++) { const t = k * minor, maj = k % 5 === 0; h += `<i class="${maj ? 'maj' : ''}" style="left:${t * pps}px"></i>`; if (maj) h += `<span style="left:${t * pps}px">${fmtTC(t).slice(6)}</span>`; }
     ruler.innerHTML = h; }
-  const clipHTML = c => `<div class="clip ${c.bg ? 'cS' : 'cG'}${c.user ? ' cU' : ''}${sel === c ? ' sel' : ''}${changed(c) ? ' moved' : ''}" data-k="${c.k}" style="left:${c.st.in * pps}px;width:${Math.max(4, (c.st.out - c.st.in) * pps)}px" title="${esc(c.label)} · ${c.beat} · ${fmtS(c.st.in)} → ${fmtS(c.st.out)}"><i class="hl"></i><span>${esc(c.label)}</span><i class="hr"></i></div>`;
+  const clipHTML = c => `<div class="clip ${c.bg ? 'cS' : 'cG'}${c.user ? ' cU' : ''}${c.guide ? ' cGuide' : ''}${sels.has(c) ? ' sel' : ''}${changed(c) ? ' moved' : ''}" data-k="${c.k}" style="left:${c.st.in * pps}px;width:${Math.max(4, (c.st.out - c.st.in) * pps)}px" title="${esc(c.label)} · ${c.beat} · ${fmtS(c.st.in)} → ${fmtS(c.st.out)}"><i class="hl"></i><span>${c.guide ? '🔒 ' : ''}${esc(c.label)}</span><i class="hr"></i></div>`;
   function draw() {
     inner.style.width = (DUR * pps + 40) + 'px'; drawRuler();
     lane('beats').innerHTML = BEATS.map((b, j) => `<div class="bt b${j % 4}" style="left:${b.t0 * pps}px;width:${(Math.min(b.t1, DUR) - b.t0) * pps}px" title="${esc(b.title)}"><span>${b.id} · ${b.kind || ''}</span></div>`).join('');
@@ -151,22 +151,35 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   const snapPts = skip => { const p = [now(), 0, DUR]; BEATS.forEach(b => p.push(b.t0, Math.min(b.t1, DUR))); W.forEach(w => p.push(w[0], w[1])); clips.forEach(c => { if (c !== skip) p.push(c.st.in, c.st.out); }); return p; };
   function snapT(t, skip) { if (!snap) return Math.round(t * FPS) / FPS; const th = 7 / pps; let best = null; snapPts(skip).forEach(p => { if (Math.abs(p - t) < th && (best === null || Math.abs(p - t) < Math.abs(best - t))) best = p; }); return best !== null ? best : Math.round(t * FPS) / FPS; }
   let drag = null;
-  inner.addEventListener('pointerdown', ev => { const el = ev.target.closest('.clip.cG,.clip.cS'); if (!el) return; ev.preventDefault(); const c = clips.find(x => x.k === el.dataset.k); select(c);
-    drag = { c, mode: ev.target.classList.contains('hl') ? 'l' : ev.target.classList.contains('hr') ? 'r' : 'm', x0: ev.clientX, st0: { ...c.st }, moved: false }; inner.setPointerCapture(ev.pointerId); });
+  inner.addEventListener('pointerdown', ev => { const el = ev.target.closest('.clip.cG,.clip.cS'); if (!el) return; ev.preventDefault(); const c = clips.find(x => x.k === el.dataset.k); if (!c || c.guide) return;
+    /* Shift+click adds / removes a layer; dragging one of the selected layers moves them all */
+    const keepGroup = !ev.shiftKey && sels.has(c) && sels.size > 1;
+    if (ev.shiftKey) select(c, true); else if (!keepGroup) select(c); else { sel = c; showSel(); }
+    if (!sels.has(c)) return;
+    const mode = ev.target.classList.contains('hl') ? 'l' : ev.target.classList.contains('hr') ? 'r' : 'm';
+    drag = { c, mode, x0: ev.clientX, st0: { ...c.st }, moved: false, keepGroup, group: mode === 'm' ? [...sels].filter(x => !isLocked(x.k)).map(x => ({ c: x, st0: { ...x.st } })) : [{ c, st0: { ...c.st } }] }; inner.setPointerCapture(ev.pointerId); });
   inner.addEventListener('pointermove', ev => {
     if (!drag) return; const c = drag.c, dt = (ev.clientX - drag.x0) / pps; if (!drag.moved && Math.abs(ev.clientX - drag.x0) < 3) return;
     if (!drag.moved) { undo.push({ c, st: { ...drag.st0 } }); drag.moved = true; }
     const s0 = drag.st0, len = s0.out - s0.in, MIN = 0.1;
-    if (drag.mode === 'm') { let a = s0.in + dt; const sa = snapT(a, c), sb = snapT(a + len, c); a = (snap && Math.abs(sb - (a + len)) < Math.abs(sa - a)) ? sb - len : sa; a = Math.max(0, Math.min(DUR - len, a)); c.st.in = a; c.st.out = a + len; c.st.off = s0.off + (a - s0.in); }
+    if (drag.mode === 'm') { let a = s0.in + dt; const sa = snapT(a, c), sb = snapT(a + len, c); a = (snap && Math.abs(sb - (a + len)) < Math.abs(sa - a)) ? sb - len : sa;
+      let d = a - s0.in; const lo = Math.min(...drag.group.map(g => g.st0.in)), hi = Math.max(...drag.group.map(g => g.st0.out)); d = Math.max(-lo, Math.min(DUR - hi, d));
+      drag.group.forEach(g => { const x = g.c; x.st.in = g.st0.in + d; x.st.out = g.st0.out + d; x.st.off = g.st0.off + d; if (x !== c) { apply(x); const ex = inner.querySelector(`.clip[data-k="${CSS.escape(x.k)}"]`); if (ex) ex.style.left = (x.st.in * pps) + 'px'; } }); }
     else if (drag.mode === 'l') c.st.in = Math.max(0, Math.min(s0.out - MIN, snapT(s0.in + dt, c)));
     else c.st.out = Math.min(DUR, Math.max(s0.in + MIN, snapT(s0.out + dt, c)));
     apply(c); const el = inner.querySelector(`.clip[data-k="${c.k}"]`); if (el) { el.style.left = (c.st.in * pps) + 'px'; el.style.width = Math.max(4, (c.st.out - c.st.in) * pps) + 'px'; }
     if (drag.mode === 'l') seek(c.st.in + 0.02); else if (drag.mode === 'r') seek(Math.max(0, c.st.out - 0.04)); else pv.refresh();
     showSel(); });
-  inner.addEventListener('pointerup', () => { if (drag && drag.moved) { pv.refresh(); draw(); commit(drag.c); } drag = null; });
-  function select(c) { sel = c; if (c) msel = null; Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); if (c && c.d) c.d.classList.add('pa-sel'); inner.querySelectorAll('.clip.sel').forEach(x => x.classList.remove('sel')); if (c) inner.querySelector(`.clip[data-k="${c.k}"]`)?.classList.add('sel'); showSel(); onSelect && onSelect(c); }
-  function showSel() { const r = box.querySelector('.tlReset'); upB.disabled = downB.disabled = !sel; delB.disabled = !sel && !msel;
+  inner.addEventListener('pointerup', () => { if (drag && drag.moved) { pv.refresh(); draw(); drag.group.forEach(g => { if (g.c !== drag.c) commit(g.c); }); commit(drag.c); } else if (drag && drag.keepGroup) select(drag.c); drag = null; });
+  function paintSel() { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sels.forEach(x => x.d && x.d.classList.add('pa-sel'));
+    inner.querySelectorAll('.clip.sel').forEach(x => x.classList.remove('sel')); sels.forEach(x => inner.querySelector(`.clip[data-k="${CSS.escape(x.k)}"]`)?.classList.add('sel')); showSel(); }
+  function select(c, add) {
+    if (add && c) { if (sels.has(c)) { sels.delete(c); if (sel === c) sel = [...sels].pop() || null; } else { sels.add(c); sel = c; } }
+    else { sels = new Set(c ? [c] : []); sel = c || null; }
+    if (sel) msel = null; paintSel(); onSelect && onSelect([...sels].map(x => x.k), sel ? sel.k : null); }
+  function showSel() { const r = box.querySelector('.tlReset'); upB.disabled = downB.disabled = !sel || sels.size !== 1; delB.disabled = !sels.size && !msel;
     if (!sel) { selEl.textContent = msel ? 'Your photo/video selected' : ''; r.disabled = true; return; } r.disabled = false;
+    if (sels.size > 1) { selEl.innerHTML = `<b>${sels.size} layers</b> selected · drag one to move them all · Shift+click to add or remove`; return; }
     selEl.innerHTML = `<b>${esc(sel.label)}</b> · ${sel.beat} · ${fmtS(sel.st.in)} → ${fmtS(sel.st.out)} (${(sel.st.out - sel.st.in).toFixed(2)} s)${changed(sel) ? ' <em>changed</em>' : ''}`; }
   function resetClip(c) { undo.push({ c, st: { ...c.st } }); c.st = { in: c.o.in, out: c.o.out, off: 0 }; apply(c); commit(c); }
   box.querySelector('.tlReset').onclick = () => { if (sel) { resetClip(sel); pv.refresh(); draw(); showSel(); } };
@@ -215,7 +228,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     const other = zList(!sel.bg), bgL = sel.bg ? rest : other, fgL = sel.bg ? other : rest;
     onLayers([...bgL, ...fgL].map(c => c.k), sel.k); }
   function deleteSel() { if (!onDelete) return;
-    if (sel) { if (isLocked(sel.k)) { say('That track is locked'); return; } const k = sel.k; select(null); onDelete(k); return; }
+    if (sels.size) { const ks = [...sels].filter(c => !isLocked(c.k)).map(c => c.k); if (!ks.length) { say('That track is locked'); return; } select(null); onDelete(ks); return; }
     if (msel) { if (locks.has('mine')) { say('That track is locked'); return; } const k = 'm:' + msel; msel = null; onDelete(k); } }
   if (!onLayers) [upB, downB, delB, box.querySelector('.tlAddWrap')].forEach(x => { if (x) x.hidden = true; });
   upB.onclick = () => moveLayer(1); downB.onclick = () => moveLayer(-1); delB.onclick = deleteSel;
@@ -244,6 +257,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   /* re-read your timeline edits after an undo */
   function sync() { clips.forEach(c => { const s = project.timeline[c.k]; c.st = s ? { in: +s.in, out: +s.out, off: +(s.off || 0) } : { in: c.o.in, out: c.o.out, off: 0 }; apply(c); }); pv.refresh(); draw(); showSel(); }
   return { seek, togglePlay, changesText, sync, redraw: () => draw(), now, isLocked, deleteSel,
+    markSel: keys => { sels = new Set(clips.filter(c => keys.includes(c.k))); sel = sels.size ? [...sels].pop() : null; if (sel) msel = null; paintSel(); },
     selectKey: k => { const c = clips.find(x => x.k === k); if (c) { select(c); const el = inner.querySelector(`.clip[data-k="${CSS.escape(k)}"]`); if (el) { const x = el.offsetLeft; if (x < scroll.scrollLeft || x > scroll.scrollLeft + scroll.clientWidth - 40) scroll.scrollLeft = x - 60; el.scrollIntoView({ block: 'nearest' }); } } },
-    selectMedia: id => { msel = id; if (id) select(null); drawMine(); showSel(); }, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); gEl.remove(); document.removeEventListener('pointerdown', onDocDown); } };
+    selectMedia: id => { msel = id; if (id) { sels = new Set(); sel = null; paintSel(); } drawMine(); showSel(); }, destroy() { alive = false; document.removeEventListener('keydown', onKey); ro.disconnect(); gEl.remove(); document.removeEventListener('pointerdown', onDocDown); } };
 }

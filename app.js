@@ -1,6 +1,6 @@
-import { createPreview } from './engine.js?v=17.2';
-import { createTimeline, fmtTC } from './timeline.js?v=17.2';
-import { attachTools, wireMic } from './tools.js?v=17.2';
+import { createPreview } from './engine.js?v=17.3';
+import { createTimeline, fmtTC } from './timeline.js?v=17.3';
+import { attachTools, wireMic } from './tools.js?v=17.3';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
@@ -198,7 +198,9 @@ function mount(file) {
   paintTry();
   pv = createPreview($('#monitor'), proj, mediaURL);
   const ro = !!S.mirror;
-  tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, onMedia: (k, m) => { if (k === 'move' && tools) tools.sync(); }, status,
+  tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, status,
+    onMedia: (k, m) => { if (!tools) return; if (k === 'move') tools.sync(); else if (k === 'select' && !ro) { tools.use('move'); tools.pick('m:' + m.id); } },
+    onSelect: (keys, main) => { if (!tools || ro) return; if (keys.length) tools.use('move'); tools.selectKeys(keys, main); },
     onLayers: ro ? null : setLayerOrder, onDelete: ro ? null : deleteLayer, onAddLayer: ro ? null : addLayer });
   tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc, onDelete: ro ? null : deleteLayer });
   $('#tools').hidden = !!S.mirror; if (S.mirror) $('#toolHint').textContent = 'View only: this tab shows P1–P8 back to back, with every change you make in those tabs.';
@@ -219,12 +221,13 @@ function remount(k) { if (!S || !pv) return; const t = pv.time(), m = tools && t
   go(); if (pv.video.readyState < 1) pv.video.addEventListener('loadedmetadata', go, { once: true });
   if (m && tools) tools.use(m); if (k) { tl.selectKey && tl.selectKey(k); if (m === 'move' && tools) tools.pick(k); } }
 function setLayerOrder(order, k) { if (!S || S.mirror) return; (S.review.layers ||= {}).order = order; changedNow(); remount(k); status('Layer moved · Ctrl+Z to undo'); }
-function deleteLayer(k) { if (!S || S.mirror || !k) return; const R = S.review;
-  if (k.startsWith('m:')) { const i = (R.media || []).findIndex(x => 'm:' + x.id === k); if (i >= 0) R.media.splice(i, 1); changedNow(); remount(); status('Your photo/video was deleted · Ctrl+Z to undo'); return; }
-  const L = R.layers ||= {};
-  if (k.startsWith('u:')) L.added = (L.added || []).filter(a => 'u:' + a.id !== k); else { L.deleted ||= []; if (!L.deleted.includes(k)) L.deleted.push(k); }
-  delete S.timeline[k]; if (R.moves) delete R.moves[k]; if (L.order) L.order = L.order.filter(x => x !== k);
-  cleanLayers(R); changedNow(); remount(); status('Layer deleted · Ctrl+Z to undo'); }
+function deleteLayer(ks) { if (!S || S.mirror || !ks) return; const R = S.review; ks = [].concat(ks); let n = 0;
+  ks.forEach(k => {
+    if (k.startsWith('m:')) { const i = (R.media || []).findIndex(x => 'm:' + x.id === k); if (i >= 0) { R.media.splice(i, 1); n++; } return; }
+    const L = R.layers ||= {};
+    if (k.startsWith('u:')) L.added = (L.added || []).filter(a => 'u:' + a.id !== k); else { L.deleted ||= []; if (!L.deleted.includes(k)) L.deleted.push(k); }
+    delete S.timeline[k]; if (R.moves) delete R.moves[k]; if (L.order) L.order = L.order.filter(x => x !== k); n++; });
+  cleanLayers(R); changedNow(); remount(); status((n > 1 ? n + ' layers' : 'Layer') + ' deleted · Ctrl+Z to undo'); }
 function addLayer(kind, text, t) { if (!S || S.mirror) return;
   if (kind === 'media') { $('#tools .addMedia')?.click(); return; }
   t = Math.max(0, Math.min(S.duration - 0.2, +t || 0)); const id = 't' + Date.now().toString(36);
@@ -715,7 +718,7 @@ function seqText(s) {
   const r = s.review, L = [`== ${s.name || s.id.toUpperCase()} (${s.version || ''})${r.approved ? ' · APPROVED' : ''}`];
   (orig[s.id] || []).forEach(b => { const bits = [];
     if (r.picks[b.id]) bits.push(r.picks[b.id]); if ((r.notes[b.id] || '').trim()) bits.push('note: ' + r.notes[b.id].trim());
-    const mv = Object.entries(r.moves || {}).filter(([k]) => k.startsWith(b.id + ':')); if (mv.length) bits.push('moved (apply exactly, cqw of frame width): ' + mv.map(([k, m]) => `el#${k.split(':')[1]} x${m.x >= 0 ? '+' : ''}${m.x} y${m.y >= 0 ? '+' : ''}${m.y}${Math.abs((m.s || 1) - 1) > .001 ? ' size ' + Math.round(m.s * 100) + '%' : ''}`).join('; '));
+    const mv = Object.entries(r.moves || {}).filter(([k]) => k.startsWith(b.id + ':') && !/\bguide\b/.test((b.els[+k.split(':')[1]] || {}).cls || '')); if (mv.length) bits.push('moved (apply exactly, cqw of frame width): ' + mv.map(([k, m]) => `el#${k.split(':')[1]} x${m.x >= 0 ? '+' : ''}${m.x} y${m.y >= 0 ? '+' : ''}${m.y}${Math.abs((m.s || 1) - 1) > .001 ? ' size ' + Math.round(m.s * 100) + '%' : ''}`).join('; '));
     const tm = Object.entries(s.timeline || {}).filter(([k]) => k.startsWith(b.id + ':')); if (tm.length) bits.push('timeline (apply exactly): ' + tm.map(([k, v]) => `el#${k.split(':')[1]} in ${(+v.in).toFixed(2)} s, out ${(+v.out).toFixed(2)} s${Math.abs(v.off || 0) > .004 ? ' (whole clip moved)' : ''}`).join('; '));
     const ks = (r.cams || []).filter(k => k.t >= b.t0 && k.t < b.t1); if (ks.length) bits.push('my zoom/pan (use exactly): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; '));
     (r.drawings || []).filter(d => d.beat === b.id).forEach(d => bits.push(`drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`));

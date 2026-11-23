@@ -315,3 +315,12 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .tlAddText{display:flex;gap:4px;padding:4px 2px 2px}.tlAddText input{flex:1;min-width:0;background:#15151a;border:1px solid #3a3a43;border-radius:5px;color:#fff;font:12.5px Roboto;padding:5px 7px}
 .tlAddText button{background:var(--orange);border:0;border-radius:5px;color:#111;font:600 12px Roboto;padding:0 10px;cursor:pointer}
 .toolHint .aln{display:inline-flex;gap:4px;margin:0 4px}.toolHint .aln button:hover{border-color:#FF7A1A;color:#fff}
+
+/* v17.3: Premiere-style Position / Scale, guides, multi-select */
+.toolHint .pfs{display:inline-flex;gap:14px;margin:0 6px;align-items:center}
+.toolHint .pf{display:inline-flex;gap:8px;align-items:center}.toolHint .pf i{font-style:normal;color:#cfcfd8}
+.toolHint .pf em{font:500 13px/1 "Roboto Mono",monospace;font-style:normal;color:#4da3ff;cursor:ew-resize;min-width:52px;text-align:right;padding:3px 2px;border-bottom:1px dotted rgba(77,163,255,.45);user-select:none}
+.toolHint .pf em:hover,.toolHint .pf em.on{color:#8cc4ff}
+.toolHint .pf em input{width:64px;background:#15151a;border:1px solid #4da3ff;border-radius:4px;color:#fff;font:500 13px "Roboto Mono",monospace;padding:2px 4px;text-align:right}
+.clip.cGuide{background:repeating-linear-gradient(135deg,#3a3a42 0 6px,#33333a 6px 12px);border-color:#55555f;color:#bbb;pointer-events:none;cursor:default}
+.toolHint{position:relative;z-index:6}

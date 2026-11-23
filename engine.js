@@ -66,7 +66,7 @@ export function createPreview(host, project, src) {
   }
   function applyMoves() { const mv = (project.review && project.review.moves) || {};
     Object.keys(byK).forEach(k => { const d = byK[k], b = base[k], m = mv[k];
-      if (!m) { d.style.translate = b.x || b.y ? `${b.x}cqw ${b.y}cqw` : ''; d.style.scale = b.s !== 1 ? String(b.s) : ''; return; }
+      if (!m || d.classList.contains('guide')) { d.style.translate = b.x || b.y ? `${b.x}cqw ${b.y}cqw` : ''; d.style.scale = b.s !== 1 ? String(b.s) : ''; return; }
       d.style.translate = `${(b.x + m.x).toFixed(2)}cqw ${(b.y + m.y).toFixed(2)}cqw`; d.style.scale = String(+(b.s * m.s).toFixed(3)); }); }
   let lt;
   function render(t) {
