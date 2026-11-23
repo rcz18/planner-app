@@ -5,10 +5,10 @@
 'use strict';
 const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn } = require('child_process');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.3';
 const DIR = __dirname;
 const CFG_FILE = path.join(DIR, 'config.json');
-let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch (e) {}
+let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) {}
 const PORT = +cfg.port || 47321;
 const ROOT = path.resolve(cfg.root || os.homedir());
 const ORIGINS = ['https://rcz18.github.io'].concat(cfg.origins || []);
@@ -30,14 +30,17 @@ function findClaude() {
 }
 
 /* ---------- find the project file the app has open (the browser does not tell us its full path) ---------- */
-const SKIP = new Set(['Library', 'node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
-const known = new Map(); // "name|id" → path
+const SKIP = new Set(['Adobe Premiere Pro Captured and Generated', 'Motion Graphics Template Media', 'Animation Composer', 'Downloads', 'Mogrts', 'media', 'Library', 'node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
+const KNOWN_FILE = path.join(DIR, 'known.json');   // remembers where each project file lives, so a big Google Drive folder is not searched every time
+const known = new Map(Object.entries((() => { try { return JSON.parse(fs.readFileSync(KNOWN_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { return {}; } })())); // "name|id" → path
+const saveKnown = () => { try { fs.writeFileSync(KNOWN_FILE, JSON.stringify(Object.fromEntries(known), null, 1)); } catch (e) {} };
 async function findPlanner(name, id) {
   const key = name + '|' + id, hit = known.get(key);
   if (hit && await matches(hit, id)) return hit;
-  const found = [];
+  const found = [], t0 = Date.now(); let slow = false;
   async function walk(d, depth) {
     if (depth > 7 || found.length > 20) return;
+    if (Date.now() - t0 > 90000) { slow = true; return; }
     let ents; try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch (e) { return; }
     for (const e of ents) {
       if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
@@ -46,10 +49,13 @@ async function findPlanner(name, id) {
       else if (e.name === name) found.push(p);
     }
   }
+  log('searching for', name, 'in', ROOT);
   await walk(ROOT, 0);
+  log('search done', name, found.length, 'found', Math.round((Date.now() - t0) / 1000) + 's');
   let best = null, bestT = 0;
   for (const p of found) { if (!(await matches(p, id))) continue; const t = (await fsp.stat(p)).mtimeMs; if (t > bestT) { best = p; bestT = t; } }
-  if (best) known.set(key, best);
+  if (best) { known.set(key, best); saveKnown(); }
+  else if (slow) throw Object.assign(new Error(`Searching ${ROOT} took too long and "${name}" was not found yet. Open the project file once more, then try again.`), { code: 504 });
   return best;
 }
 async function matches(p, id) {
@@ -58,60 +64,104 @@ async function matches(p, id) {
 }
 function projectRoot(file) { const d = path.dirname(file); return path.basename(d).toLowerCase() === 'planner app' ? path.dirname(d) : d; }
 
-/* ---------- the job: one at a time ---------- */
+/* ---------- the queue: one job runs at a time, the rest wait their turn ---------- */
 let job = null, child = null, seq = 0;
+const queue = [], history = [];
 function stepFrom(ev) {
   if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
     for (const c of ev.message.content.slice().reverse()) {
       if (c.type === 'tool_use') {
         const i = c.input || {};
         const what = i.description || (i.file_path && path.basename(i.file_path)) || i.pattern || i.skill || i.command || '';
-        return (c.name + (what ? ': ' + String(what) : '')).slice(0, 90);
+        return { tool: true, text: (c.name + (what ? ': ' + String(what) : '')).slice(0, 90) };
       }
-      if (c.type === 'text' && c.text && c.text.trim()) return c.text.trim().split('\n')[0].slice(0, 90);
+      if (c.type === 'text' && c.text && c.text.trim()) return { tool: false, text: c.text.trim().split('\n')[0].slice(0, 140) };
     }
   }
   return null;
 }
-async function startJob({ file, project, command }) {
-  if (child) throw Object.assign(new Error('Claude Code is still working on the last request.'), { code: 409 });
+function parse(command) {   // "/planner revise P2" → { kind: 'revise', seq: 'P2' }
+  const w = String(command || '').replace(/^\/planner\s*/, '').trim().split(/\s+/);
+  const kind = (w[0] || 'request').toLowerCase();
+  if (kind === 'apply' && /^all$/i.test(w[1] || '')) return { kind: 'apply all changes', seq: 'all' };
+  return { kind, seq: w[1] || '', beat: w[2] || '' };
+}
+const pub = j => j && { id: j.id, seq: j.seq, kind: j.kind, beat: j.beat, command: j.command, file: path.basename(j.file || ''), state: j.state, step: j.step, pct: j.pct, steps: j.steps.slice(-8),
+  queuedAt: j.queuedAt, started: j.started, ended: j.ended, result: j.result };
+function snapshot() { return { job: pub(job && job.state === 'running' ? job : job), running: !!child, queue: queue.map(pub), history: history.slice(0, 15).map(pub), helper: VERSION }; }
+async function readStatusPct(j) {   // the % Claude writes into planner-status.json (if any)
+  for (const f of [path.join(path.dirname(j.file), 'planner-status.json'), path.join(path.dirname(j.file), 'Planner App', 'planner-status.json')]) {
+    try { const st = JSON.parse(await fsp.readFile(f, 'utf8')); const it = (st.jobs || []).find(x => String(x.seq).toLowerCase() === String(j.seq).toLowerCase() && (!x.at || x.at >= j.started || x.state !== 'done'));
+      if (it && +it.pct) return Math.min(99, +it.pct); } catch (e) {}
+  }
+  return 0;
+}
+async function enqueue({ file, project, command, request }) {
   if (!/^\/planner(\s+[\w .,#&()'-]{1,80})?$/.test(command || '')) throw Object.assign(new Error('Only /planner requests can be run.'), { code: 400 });
   if (!/\.planner$/i.test(file || '') || /[\\/]/.test(file)) throw Object.assign(new Error('Bad project file name.'), { code: 400 });
-  const claude = findClaude(); if (!claude) throw Object.assign(new Error('Claude Code is not installed on this computer. Run the Planner Helper setup again.'), { code: 412 });
+  if (!findClaude()) throw Object.assign(new Error('Claude Code is not installed on this computer. Run the Planner Helper setup again.'), { code: 412 });
   const pf = await findPlanner(file, project);
   if (!pf) throw Object.assign(new Error(`Could not find "${file}" inside ${ROOT}. Is it in your projects folder?`), { code: 404 });
-  const cwd = projectRoot(pf);
-  const prompt = `Use the planner skill.\nProject file: ${pf}\nComputer: ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows PC' : process.platform}\nRequest: ${command}\nDo the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
+  const same = queue.find(q => q.file === pf && q.command === command);
+  if (same) return { id: same.id, file: pf, position: queue.indexOf(same) + 1 + (child ? 1 : 0), queued: true };
+  const p = parse(command);
+  const j = { id: ++seq, file: pf, command, request: request && typeof request === 'object' ? request : null, ...p, state: 'queued', step: 'Waiting in line', pct: 0, steps: [], lines: [], queuedAt: new Date().toISOString(), result: null };
+  queue.push(j); log('queued', j.id, command, '(' + queue.length + ' waiting)');
+  setImmediate(next);
+  return { id: j.id, file: pf, position: queue.indexOf(j) + 1 + (child ? 1 : 0), queued: !!child };
+}
+function next() {
+  if (child || !queue.length) return;
+  const j = queue.shift(); job = j;
+  const claude = findClaude(); if (!claude) { j.state = 'error'; j.step = 'Claude Code is not installed'; finish(j); return; }
+  const cwd = projectRoot(j.file);
+  const prompt = `Use the planner skill.\nProject file: ${j.file}\nComputer: ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows PC' : process.platform}\nRequest: ${j.command}\n${j.request ? 'Request details for THIS job (the project file\'s `request` field may already be a newer queued request, so use these): ' + JSON.stringify(j.request).slice(0, 60000) + '\n' : ''}Do the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,' + (process.platform === 'win32' ? 'PowerShell,' : '') + 'WebFetch,WebSearch,TodoWrite,Skill,Task'];
-  if (cfg.model) args.push('--model', cfg.model);
-  const id = ++seq, logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
-  job = { id, state: 'running', step: 'Starting Claude Code…', file: pf, command, started: new Date().toISOString(), lines: [], result: null };
-  log('job', id, command, pf);
+  let model = cfg.model; try { model = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')).model; } catch (e) {}   // read fresh, so a fixed config works without a restart
+  if (model && /^[A-Za-z0-9._:\[\]-]{1,80}$/.test(model)) args.push('--model', model);
+  const logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
+  Object.assign(j, { state: 'running', step: 'Starting Claude Code…', pct: 3, started: new Date().toISOString() });
+  log('job', j.id, j.command, j.file);
   const isCmd = /\.(cmd|bat)$/i.test(claude);
-  child = spawn(claude, args, { cwd, windowsHide: true, shell: isCmd, env: { ...process.env, PLANNER_FILE: pf } });
+  try { child = spawn(claude, args, { cwd, windowsHide: true, shell: isCmd, env: { ...process.env, PLANNER_FILE: j.file } }); }
+  catch (e) { j.state = 'error'; j.step = 'Could not start Claude Code: ' + e.message; finish(j); return; }
   child.stdin.end(prompt);
   const out = fs.createWriteStream(logFile);
-  let buf = '';
+  let buf = '', tools = 0;
+  const tick = setInterval(async () => { if (j.state !== 'running') return clearInterval(tick);
+    const mins = (Date.now() - Date.parse(j.started)) / 60000, est = Math.min(92, 5 + tools * 6 + mins * 4);
+    j.pct = Math.round(Math.max(j.pct, est, await readStatusPct(j))); }, 2000);
   child.stdout.on('data', d => { out.write(d); buf += d; let i;
     while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
       let ev; try { ev = JSON.parse(line); } catch (e) { continue; }
-      const s = stepFrom(ev); if (s) { job.step = s; job.lines.push(s); if (job.lines.length > 40) job.lines.shift(); }
-      if (ev.type === 'result') { job.result = { ok: !ev.is_error, text: String(ev.result || '').slice(0, 2000), turns: ev.num_turns, seconds: Math.round((ev.duration_ms || 0) / 1000) }; }
+      const s = stepFrom(ev); if (s) { if (s.tool) tools++; j.step = s.text; j.steps.push({ t: new Date().toISOString(), text: s.text, said: !s.tool }); if (j.steps.length > 60) j.steps.shift(); }
+      if (ev.type === 'result') { j.result = { ok: !ev.is_error, text: String(ev.result || '').slice(0, 2000), turns: ev.num_turns, seconds: Math.round((ev.duration_ms || 0) / 1000) }; }
     } });
   let err = ''; child.stderr.on('data', d => { err += d; if (err.length > 4000) err = err.slice(-4000); out.write(d); });
-  child.on('error', e => { job.state = 'error'; job.step = 'Could not start Claude Code: ' + e.message; child = null; log('spawn error', e.message); });
+  child.on('error', e => { j.state = 'error'; j.step = 'Could not start Claude Code: ' + e.message; });
   child.on('close', code => {
-    out.end();
-    if (job.state === 'running') {
-      const ok = code === 0 && (!job.result || job.result.ok);
-      job.state = ok ? 'done' : 'error';
-      job.step = ok ? 'Done' : (/login|log in|authenticat/i.test(err + (job.result && job.result.text || '')) ? 'Claude Code is not logged in. Open a terminal, type claude, and log in.' : (job.result && job.result.text || err.trim().split('\n').pop() || 'Claude Code stopped (code ' + code + ')').slice(0, 200));
+    out.end(); clearInterval(tick);
+    if (j.state === 'running') {
+      const ok = code === 0 && (!j.result || j.result.ok);
+      j.state = ok ? 'done' : 'error';
+      j.step = ok ? 'Done' : (/login|log in|authenticat/i.test(err + (j.result && j.result.text || '')) ? 'Claude Code is not logged in. Open a terminal, type claude, and log in.' : (j.result && j.result.text || err.trim().split('\n').pop() || 'Claude Code stopped (code ' + code + ')').slice(0, 200));
     }
-    job.ended = new Date().toISOString(); child = null; log('job', id, job.state, job.step);
+    child = null; finish(j);
   });
-  return { id, file: pf };
 }
+function finish(j) {
+  j.ended = new Date().toISOString(); if (j.state === 'done') j.pct = 100;
+  history.unshift(j); if (history.length > 30) history.pop();
+  log('job', j.id, j.state, j.step); child = null; setImmediate(next);
+}
+function cancel(id) {
+  const i = queue.findIndex(q => q.id === +id);
+  if (i >= 0) { const [j] = queue.splice(i, 1); j.state = 'cancelled'; j.step = 'Removed from the queue'; j.ended = new Date().toISOString(); history.unshift(j); return true; }
+  if (job && job.id === +id && child) { job.state = 'cancelled'; job.step = 'Stopped'; killChild(); return true; }
+  return false;
+}
+function killChild() { if (!child) return; if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true }); else child.kill('SIGTERM'); }
 
 /* ---------- http ---------- */
 function reply(res, origin, code, body) {
@@ -129,18 +179,23 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/status') {
       const claude = findClaude();
-      return reply(res, origin, 200, { ok: true, helper: VERSION, claude: !!claude, root: ROOT, busy: !!child, platform: process.platform,
+      return reply(res, origin, 200, { ok: true, helper: VERSION, claude: !!claude, root: ROOT, busy: !!child, queued: queue.length, queue: true, platform: process.platform,
         loggedIn: (fs.existsSync(path.join(os.homedir(), '.claude', '.credentials.json')) || process.platform === 'darwin') ? true : null });
     }
-    if (req.method === 'GET' && url.pathname === '/job') return reply(res, origin, 200, { job });
+    if (req.method === 'GET' && url.pathname === '/job') return reply(res, origin, 200, snapshot());
+    if (req.method === 'GET' && url.pathname === '/queue') return reply(res, origin, 200, snapshot());
     if (!origin) return reply(res, null, 403, { error: 'Only the Planner app can do that' });
     if (req.method === 'POST' && url.pathname === '/run') {
-      let body = ''; for await (const c of req) { body += c; if (body.length > 10000) break; }
-      const r = await startJob(JSON.parse(body || '{}'));
+      let body = ''; for await (const c of req) { body += c; if (body.length > 400000) break; }
+      const r = await enqueue(JSON.parse(body || '{}'));
       return reply(res, origin, 200, { ok: true, ...r });
     }
+    if (req.method === 'POST' && url.pathname === '/cancel') {
+      let body = ''; for await (const c of req) { body += c; if (body.length > 1000) break; }
+      return reply(res, origin, 200, { ok: cancel((JSON.parse(body || '{}')).id) });
+    }
     if (req.method === 'POST' && url.pathname === '/stop') {
-      if (child) { job.state = 'error'; job.step = 'Stopped'; if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true }); else child.kill('SIGTERM'); }
+      if (child && job) { job.state = 'cancelled'; job.step = 'Stopped'; killChild(); }
       return reply(res, origin, 200, { ok: true });
     }
     reply(res, origin, 404, { error: 'Not found' });
