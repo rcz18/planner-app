@@ -5,10 +5,10 @@
 'use strict';
 const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn } = require('child_process');
 
-const VERSION = '1.2.1';
+const VERSION = '1.2.3';
 const DIR = __dirname;
 const CFG_FILE = path.join(DIR, 'config.json');
-let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch (e) {}
+let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) {}
 const PORT = +cfg.port || 47321;
 const ROOT = path.resolve(cfg.root || os.homedir());
 const ORIGINS = ['https://rcz18.github.io'].concat(cfg.origins || []);
@@ -30,14 +30,17 @@ function findClaude() {
 }
 
 /* ---------- find the project file the app has open (the browser does not tell us its full path) ---------- */
-const SKIP = new Set(['Library', 'node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
-const known = new Map(); // "name|id" → path
+const SKIP = new Set(['Adobe Premiere Pro Captured and Generated', 'Motion Graphics Template Media', 'Animation Composer', 'Downloads', 'Mogrts', 'media', 'Library', 'node_modules', '.git', '.backups', 'Assets', 'Export', 'Adobe Premiere Pro Auto-Save', 'Adobe Premiere Pro Video Previews', 'Adobe Premiere Pro Audio Previews', '$RECYCLE.BIN', 'System Volume Information']);
+const KNOWN_FILE = path.join(DIR, 'known.json');   // remembers where each project file lives, so a big Google Drive folder is not searched every time
+const known = new Map(Object.entries((() => { try { return JSON.parse(fs.readFileSync(KNOWN_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { return {}; } })())); // "name|id" → path
+const saveKnown = () => { try { fs.writeFileSync(KNOWN_FILE, JSON.stringify(Object.fromEntries(known), null, 1)); } catch (e) {} };
 async function findPlanner(name, id) {
   const key = name + '|' + id, hit = known.get(key);
   if (hit && await matches(hit, id)) return hit;
-  const found = [];
+  const found = [], t0 = Date.now(); let slow = false;
   async function walk(d, depth) {
     if (depth > 7 || found.length > 20) return;
+    if (Date.now() - t0 > 90000) { slow = true; return; }
     let ents; try { ents = await fsp.readdir(d, { withFileTypes: true }); } catch (e) { return; }
     for (const e of ents) {
       if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
@@ -46,10 +49,13 @@ async function findPlanner(name, id) {
       else if (e.name === name) found.push(p);
     }
   }
+  log('searching for', name, 'in', ROOT);
   await walk(ROOT, 0);
+  log('search done', name, found.length, 'found', Math.round((Date.now() - t0) / 1000) + 's');
   let best = null, bestT = 0;
   for (const p of found) { if (!(await matches(p, id))) continue; const t = (await fsp.stat(p)).mtimeMs; if (t > bestT) { best = p; bestT = t; } }
-  if (best) known.set(key, best);
+  if (best) { known.set(key, best); saveKnown(); }
+  else if (slow) throw Object.assign(new Error(`Searching ${ROOT} took too long and "${name}" was not found yet. Open the project file once more, then try again.`), { code: 504 });
   return best;
 }
 async function matches(p, id) {
@@ -112,7 +118,7 @@ function next() {
   const prompt = `Use the planner skill.\nProject file: ${j.file}\nComputer: ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'Windows PC' : process.platform}\nRequest: ${j.command}\n${j.request ? 'Request details for THIS job (the project file\'s `request` field may already be a newer queued request, so use these): ' + JSON.stringify(j.request).slice(0, 60000) + '\n' : ''}Do the request now, from start to finish, without asking questions. Reply to the user in short, simple Taglish at the end.`;
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,' + (process.platform === 'win32' ? 'PowerShell,' : '') + 'WebFetch,WebSearch,TodoWrite,Skill,Task'];
-  let model = cfg.model; try { model = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')).model; } catch (e) {}   // read fresh, so a fixed config works without a restart
+  let model = cfg.model; try { model = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')).model; } catch (e) {}   // read fresh, so a fixed config works without a restart
   if (model && /^[A-Za-z0-9._:\[\]-]{1,80}$/.test(model)) args.push('--model', model);
   const logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
   Object.assign(j, { state: 'running', step: 'Starting Claude Code…', pct: 3, started: new Date().toISOString() });
