@@ -38,6 +38,11 @@ export function createPreview(host, project, src) {
     `\n:host{display:block}\n.frame{border-radius:0!important}\n.playBtn,.tcLive{display:none!important}\n.ov.pa-sel{outline:2px dashed rgba(255,224,138,.9);outline-offset:4px}` +
     `\n.uTxt{font:900 italic 6.4cqw/1.05 'Roboto Condensed',Roboto,sans-serif;color:#fff;text-align:center;white-space:pre-line;text-shadow:0 .25cqw .9cqw rgba(0,0,0,.65),0 0 .15cqw rgba(0,0,0,.5)}`;
   root.appendChild(st);
+  /* animations that only start when a [data-show] turns on (their CSS rule has .show); every other animation keeps the element's own start */
+  const SHOW_ANIMS = (() => { const css = project.css || '', set = new Set();
+    const names = new Set([...css.matchAll(/@keyframes\s+([\w-]+)/g)].map(m => m[1]));
+    for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) if (/\.show\b/.test(m[1])) for (const w of m[2].match(/[\w-]+/g) || []) if (names.has(w)) set.add(w);
+    return set; })();
   const el = document.createElement('div'); el.className = 'frame'; el.id = 'frame-all'; root.appendChild(el);
 
   const FPSRC = project.fps || 30, DUR = project.duration;
@@ -116,7 +121,7 @@ export function createPreview(host, project, src) {
       an.forEach(a => { try {
         if (paused) {
           const tg = a.effect && a.effect.target, ds = tg && tg.closest ? tg.closest('[data-show]') : null;
-          const t0 = ds && d.contains(ds) && ds.classList.contains('show') ? +ds.dataset.show : e.in;
+          const t0 = ds && d.contains(ds) && ds.classList.contains('show') && SHOW_ANIMS.has(a.animationName) ? +ds.dataset.show : e.in;
           a.currentTime = Math.max(0, (t - t0) * 1000); a.pause();
         } else if (a.playState === 'paused') { const end = a.effect ? a.effect.getComputedTiming().endTime : Infinity; if (a.currentTime >= end) a.finish(); else a.play(); }
       } catch (err) {} }); });
