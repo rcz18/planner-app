@@ -1,5 +1,5 @@
 /* Preview tools: Move / Resize, Zoom / Pan (your camera keys), Draw (+ comment), Dictate. */
-import { camAt } from './engine.js?v=17.4';
+import { camAt } from './engine.js?v=17.5';
 const FPS = 30;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 

@@ -89,7 +89,8 @@ export function createPreview(host, project, src) {
     ovs.forEach(([e, d]) => { d.classList.toggle('on', t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
       d.querySelectorAll('[data-glow]').forEach(g => g.classList.toggle('glow', t >= +g.dataset.glow)); d.querySelectorAll('[data-show]').forEach(g => g.classList.toggle('show', t >= +g.dataset.show)); });
     syncAnims(t);
-    threes.forEach(r => { if (r.inst && t >= r.e.in && t < r.e.out) { try { r.inst.render(t - r.e.in, t); } catch (err) {} } });
+    threes.forEach(r => { const on = t >= r.e.in && t < r.e.out; r.cv.style.visibility = on ? '' : 'hidden';   // a 3D layer never stays on screen outside its time, even if the plan's CSS forgets to hide it
+      if (r.inst && on) { try { r.inst.render(t - r.e.in, t); } catch (err) {} } });
   }
   async function start3(r) {
     try { const L = await lib3(), T = r.e.three;

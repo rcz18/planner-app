@@ -4,7 +4,7 @@
    double-click a screenshot to draw on it (pen, line, arrow, box, circle).
    💡 Looks: Claude writes a few looks for one beat; this app takes their screenshots itself (no renders, few tokens). */
 import { snapshot, wireMic } from './tools.js?v=17.4';
-import { createPreview } from './engine.js?v=17.4';
+import { createPreview } from './engine.js?v=17.5';
 
 const W = 960, H = 540;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
