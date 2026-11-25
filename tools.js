@@ -1,5 +1,5 @@
 /* Preview tools: Move / Resize, Zoom / Pan (your camera keys), Draw (+ comment), Dictate. */
-import { camAt } from './engine.js?v=17.5';
+import { camAt } from './engine.js?v=17.6';
 const FPS = 30;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -21,7 +21,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   .pa-box b{position:absolute;left:50%;top:-26px;transform:translateX(-50%);background:#FF7A1A;color:#fff;font:700 11px/1 Roboto,sans-serif;padding:4px 7px;border-radius:5px;white-space:nowrap}`;
   root.appendChild(st);
   let mode = '';
-  bar.innerHTML = `<button type="button" class="tool" data-m="move" title="Move / resize text and animations (M)">⤧ Move</button><button type="button" class="tool" data-m="cam" title="Zoom / pan the camera here (Z)">⌖ Zoom/Pan</button><button type="button" class="tool" data-m="draw" title="Draw on this frame and comment (D)">✎ Draw</button><button type="button" class="tool addMedia" title="Add your own photo or video here as a suggestion for Claude">＋ Photo/Video</button>`;
+  bar.innerHTML = `<button type="button" class="tool" data-m="move" title="Move / resize text and animations (V)">⤧ Move</button><button type="button" class="tool" data-m="cam" title="Zoom / pan the camera here (Z)">⌖ Zoom/Pan</button><button type="button" class="tool" data-m="draw" title="Draw on this frame and comment (D)">✎ Draw</button><button type="button" class="tool addMedia" title="Add your own photo or video here as a suggestion for Claude">＋ Photo/Video</button>`;
   const btns = [...bar.querySelectorAll('.tool[data-m]')];
   bar.querySelector('.addMedia').onclick = async () => { if (!onAddMedia) return; v.pause(); const m = await onAddMedia(+pv.time().toFixed(3)); if (!m) return; renderMedia(); if (mode !== 'move') setMode('move'); pick('m:' + m.id); changed(); };
   function setMode(m) {
@@ -61,7 +61,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     tickMedia();
   }
   function tickMedia() { const t = pv.time();
-    R.media.forEach(m => { const d = mediaEls.get(m.id); if (!d) return; const on = t >= m.t0 && t < m.t1; d.classList.toggle('on', on);
+    R.media.forEach(m => { const d = mediaEls.get(m.id); if (!d) return; const on = !m.off && t >= m.t0 && t < m.t1; d.classList.toggle('on', on);
       const vid = d.querySelector('video'); if (vid && vid.readyState >= 1) { if (on && !v.paused) { if (vid.paused) { vid.currentTime = (t - m.t0) % (vid.duration || 1e9); vid.play().catch(() => {}); } } else { if (!vid.paused) vid.pause(); if (on) { const want = (t - m.t0) % (vid.duration || 1e9); if (Math.abs(vid.currentTime - want) > 0.1) vid.currentTime = want; } } } }); }
   let mAlive = true; (function loop() { if (!mAlive) return; tickMedia(); if (mode === 'move' && group.length) { placeBox(); if (!mdrag && !rdrag && !scrub) paintFields(); } requestAnimationFrame(loop); })();
 
@@ -249,7 +249,8 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   /* keys */
   function onKey(e) { const tg = e.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return; if (e.ctrlKey || e.metaKey) return;
     const k = e.key.toLowerCase();
-    if (k === 'm') setMode('move'); else if (k === 'z') setMode('cam'); else if (k === 'd') setMode('draw'); else if (k === 'escape' && mode) setMode(mode);
+    if (e.shiftKey && /^[a-z]$/.test(k)) return;   // Shift+E etc. belong to the timeline
+    if (k === 'v') setMode('move'); else if (k === 'z') setMode('cam'); else if (k === 'd') setMode('draw'); else if (k === 'escape' && mode) setMode(mode);
     else if (mode === 'move' && group.length && (e.key === 'Delete' || e.key === 'Backspace') && onDelete) { e.preventDefault(); e.stopImmediatePropagation(); const ks = group.slice(); pick(null); onDelete(ks.length > 1 ? ks : ks[0]); }
     else if (mode === 'move' && sel && (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_')) { e.preventDefault(); e.stopImmediatePropagation(); setScale(scaleOf(sel) * (e.key === '-' || e.key === '_' ? 1 / 1.1 : 1.1)); changed(); }
     else if (mode === 'move' && group.length && e.key.startsWith('Arrow') && !e.altKey) { e.preventDefault(); e.stopImmediatePropagation(); const st = e.shiftKey ? 1 : 0.2;
@@ -259,7 +260,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
   const text = bid => { let s = ''; const mv = Object.keys(R.moves).filter(k => k.startsWith(bid + ':') && !isGuide(k));
     if (mv.length) s += ' · moved (apply exactly, cqw of frame width): ' + mv.map(k => { const m = R.moves[k]; return `el#${k.split(':')[1]} “${label(k)}” x${m.x >= 0 ? '+' : ''}${m.x} y${m.y >= 0 ? '+' : ''}${m.y}${Math.abs(m.s - 1) > .001 ? ' size ' + Math.round(m.s * 100) + '%' : ''}`; }).join('; ');
     const b = P.beats.find(x => x.id === bid), ks = b ? R.cams.filter(k => k.t >= b.t0 && k.t < b.t1) : [];
-    if (ks.length) s += ' · my zoom/pan (use exactly, replaces your camera in this beat, keep it smooth): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; ');
+    if (ks.length) s += ' · my zoom/pan (use exactly, replaces your camera in this beat, keep it smooth): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y || 0}%${k.ease === 'cut' ? ' (cut / jump to it)' : k.ease === 'lin' ? ' (linear into it)' : ''}`).join('; ');
     R.drawings.filter(d => d.beat === bid).forEach(d => { s += ` · drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`; });
     return s; };
   renderMedia();

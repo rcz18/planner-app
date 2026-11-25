@@ -10,11 +10,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Roboto:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=17.5">
+<link rel="stylesheet" href="app.css?v=17.6">
 </head>
 <body>
 <header class="menubar">
-  <button type="button" class="brand" data-act="home" title="Home"><img src="icons/icon-192.png" alt=""><b>Planner</b><small class="ver">v17.5</small></button>
+  <button type="button" class="brand" data-act="home" title="Home"><img src="icons/icon-192.png" alt=""><b>Planner</b><small class="ver">v17.6</small></button>
   <nav class="menu">
     <button type="button" data-act="open" title="Open project (Ctrl+O)">Open…</button>
     <button type="button" data-act="save" title="Save (Ctrl+S)">Save</button>
@@ -23,6 +23,7 @@
   <span id="fileName" class="fileName"></span>
   <span class="grow"></span>
   <span id="msg" class="msg" role="status"></span>
+  <button type="button" id="brandBtn" class="brandBtn" hidden title="Brand guidelines of this project">🎨 Brand</button>
   <button type="button" id="ccBadge" class="ccBadge" hidden></button>
   <div id="jobBar" class="jobBar" hidden><div class="pbar"><i></i></div><span></span></div>
   <button type="button" id="applyAllBtn" class="btn applyAllBtn" hidden title="Send every tab's notes and edits to Claude in one go">Apply all changes</button>
@@ -70,6 +71,6 @@
   <div class="dlgBtns"><button type="button" class="btn no">Cancel</button><button type="button" class="btn primary yes">Send to Claude</button></div></dialog>
 <input type="file" id="fileInput" accept=".planner,application/json" hidden>
 <dialog id="dlg"><p></p><div class="dlgBtns"><button type="button" class="btn no"></button><button type="button" class="btn primary yes"></button></div></dialog>
-<script type="module" src="app.js?v=17.5"></script>
+<script type="module" src="app.js?v=17.6"></script>
 </body>
 </html>

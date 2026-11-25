@@ -1,6 +1,7 @@
-import { createPreview } from './engine.js?v=17.5';
-import { createTimeline, fmtTC } from './timeline.js?v=17.4';
-import { attachTools, wireMic } from './tools.js?v=17.4';
+import { createPreview } from './engine.js?v=17.6';
+import { createTimeline, fmtTC } from './timeline.js?v=17.6';
+import { attachTools, wireMic } from './tools.js?v=17.6';
+import { openBrand, brandText, brandCount } from './brand.js?v=17.6';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
@@ -24,7 +25,8 @@ const orig = {};         // Claude's plan per sequence, saved back unchanged
 let fh = null, savedSig = '';
 let pv = null, tl = null, tools = null, mediaURL = null;
 
-const sig = () => P ? JSON.stringify(P.sequences.filter(s => !s.mirror).map(s => [s.review, s.timeline])) : '';
+const sig = () => P ? JSON.stringify([P.sequences.filter(s => !s.mirror).map(s => [s.review, s.timeline]), P.brand || null]) : '';
+let brandBase = 'null';   // the brand as it was last read from / written to the file (so Claude's brand updates come in when you haven't edited it)
 const dirty = () => P && sig() !== savedSig;
 function status(t) { if (t) console.log('[Planner]', t); $('#msg').textContent = t || ''; clearTimeout(status._t); if (t) status._t = setTimeout(() => $('#msg').textContent = '', 7000); }
 function paintTitle() {
@@ -37,6 +39,7 @@ setInterval(paintTitle, 800);
 
 function normalize(data) {
   if (!data) return null;
+  if (data.brand !== undefined && (typeof data.brand !== 'object' || Array.isArray(data.brand))) delete data.brand;
   if (!Array.isArray(data.sequences)) {           // single-sequence file (planner/1)
     if (!Array.isArray(data.beats)) return null;
     const { format, id, name, client, ...seq } = data;
@@ -64,6 +67,7 @@ let lastRequest = null;
 async function mergeDisk(request) {
   let data; try { const f = await withTimeout(fh.getFile(), 15000, 'Reading the file'); data = normalize(JSON.parse(await f.text())); } catch (e) { return false; }
   if (!data) return false; let cur = false;
+  takeBrand(data);
   const mine = new Set(request ? [request.sequence].concat(request.sequences || []) : []);
   data.sequences.forEach(ds => { const i = P.sequences.findIndex(x => x.id === ds.id);
     if (i < 0) { orig[ds.id] = JSON.parse(JSON.stringify(ds.beats)); P.sequences.push(ds); return; }
@@ -78,7 +82,7 @@ async function save(request) {
   try { if (!fh) return await saveAs(request);
     const cur = await mergeDisk(request);
     if (request) lastRequest = request;
-    await writeFile(fh, serialize(request)); savedSig = sig(); paintTitle(); status('Saved ' + fh.name + ' ✓');
+    await writeFile(fh, serialize(request)); savedSig = sig(); brandBase = JSON.stringify(P.brand || null); paintTitle(); status('Saved ' + fh.name + ' ✓');
     try { lastFileStamp = (await fh.getFile()).lastModified; } catch (e) {}
     if (cur) await switchSeq(S.id);
     return true;
@@ -87,7 +91,7 @@ async function save(request) {
 async function saveAs(request) {
   if (!P) return false;
   try { const h = await window.showSaveFilePicker({ id: 'planner', suggestedName: (P.name || 'project').replace(/[\\/:*?"<>|·]+/g, '-').replace(/\s+/g, ' ').trim() + '.planner', types: TYPES });
-    fh = h; if (request) lastRequest = request; await writeFile(h, serialize(request)); savedSig = sig(); await addRecent(h); paintTitle(); status('Saved ' + h.name + ' ✓'); return true;
+    fh = h; if (request) lastRequest = request; await writeFile(h, serialize(request)); savedSig = sig(); brandBase = JSON.stringify(P.brand || null); await addRecent(h); paintTitle(); status('Saved ' + h.name + ' ✓'); return true;
   } catch (e) { if (e?.name !== 'AbortError') status('Could not save: ' + (e?.message || e)); return false; }
 }
 async function openPicker() {
@@ -155,10 +159,10 @@ function showLink(seq, need) {
 /* ---------- load a project / switch sequence ---------- */
 async function load(data) {
   tl && tl.destroy(); tools && tools.destroy(); tl = tools = null;
-  P = data; Object.keys(orig).forEach(k => delete orig[k]);
+  P = data; Object.keys(orig).forEach(k => delete orig[k]); brandBase = JSON.stringify(P.brand || null); closeBrand();
   P.sequences.forEach(s => { orig[s.id] = JSON.parse(JSON.stringify(s.beats)); });
   savedSig = sig();
-  $('#start').hidden = true; $('#work').hidden = false; $('#renderBtn').hidden = false; $('#applyAllBtn').hidden = false; helperPing();
+  $('#start').hidden = true; $('#work').hidden = false; $('#renderBtn').hidden = false; $('#applyAllBtn').hidden = false; $('#brandBtn').hidden = false; paintBrandBtn(); helperPing();
   Object.keys(hist).forEach(k => delete hist[k]); Object.keys(redo).forEach(k => delete redo[k]); Object.keys(last).forEach(k => delete last[k]);
   paintTitle();
   await switchSeq((P.current && P.sequences.find(s => s.id === P.current)) ? P.current : P.sequences[0].id);
@@ -202,7 +206,7 @@ function mount(file) {
   tl = createTimeline($('#timeline'), S, pv, { onChange: changedNow, onUndo: undo, status,
     onMedia: (k, m) => { if (!tools) return; if (k === 'move') tools.sync(); else if (k === 'select' && !ro) { tools.use('move'); tools.pick('m:' + m.id); } },
     onSelect: (keys, main) => { if (!tools || ro) return; if (keys.length) tools.use('move'); tools.selectKeys(keys, main); },
-    onLayers: ro ? null : setLayerOrder, onDelete: ro ? null : deleteLayer, onAddLayer: ro ? null : addLayer });
+    onLayers: ro ? null : setLayerOrder, onDelete: ro ? null : deleteLayer, onAddLayer: ro ? null : addLayer, onMute: ro ? null : muteLayers, ro });
   tools = attachTools({ P: S, pv, tl, host: $('#monitor'), bar: $('#tools'), hint: $('#toolHint'), onChange: changedNow, onAddMedia: addMedia, mediaSrc, onDelete: ro ? null : deleteLayer });
   $('#tools').hidden = !!S.mirror; if (S.mirror) $('#toolHint').textContent = 'View only: this tab shows P1–P8 back to back, with every change you make in those tabs.';
   pv.video.addEventListener('timeupdate', markBeat); pv.video.addEventListener('seeked', markBeat);
@@ -210,12 +214,14 @@ function mount(file) {
 }
 /* ---------- layers (timeline): your order, deleted layers and new text layers, kept in review.layers ---------- */
 function applyLayers(beats, L) { if (!L) return beats;
-  const del = new Set(L.deleted || []);
+  const del = new Set(L.deleted || []), mute = new Set(L.mute || []);
   beats.forEach(b => b.els.forEach((e, i) => { if (del.has(b.id + ':' + i)) e._del = true; }));
   (L.added || []).forEach(a => { const b = beats.find(x => a.t0 >= x.t0 && a.t0 < x.t1) || beats[beats.length - 1]; if (!b) return;
     b.els.push({ _uid: a.id, in: a.t0, out: a.t1, cls: 'uLayer', pos: 'left:0;right:0;top:62%;display:flex;justify-content:center', html: `<div class="uTxt">${esc(a.text)}</div>` }); });
+  /* Mute (Shift+E): every key in L.mute is switched the other way from the plan (off ↔ on) */
+  if (mute.size) beats.forEach(b => b.els.forEach((e, i) => { const k = e._uid ? 'u:' + e._uid : b.id + ':' + i; if (mute.has(k)) e._off = !e.off; }));
   return beats; }
-const cleanLayers = R => { const L = R.layers; if (!L) return; ['deleted', 'added', 'order'].forEach(x => { if (L[x] && !L[x].length) delete L[x]; }); if (!Object.keys(L).length) delete R.layers; };
+const cleanLayers = R => { const L = R.layers; if (!L) return; ['deleted', 'added', 'order', 'mute'].forEach(x => { if (L[x] && !L[x].length) delete L[x]; }); if (!Object.keys(L).length) delete R.layers; };
 /* rebuild the preview + timeline, keeping the time, the tool and the selection */
 function remount(k) { if (!S || !pv) return; const t = pv.time(), m = tools && tools.mode ? tools.mode() : '';
   mount(KEEP); const go = () => pv.seek(t);
@@ -234,6 +240,13 @@ function addLayer(kind, text, t) { if (!S || S.mirror) return;
   t = Math.max(0, Math.min(S.duration - 0.2, +t || 0)); const id = 't' + Date.now().toString(36);
   ((S.review.layers ||= {}).added ||= []).push({ id, text, t0: +t.toFixed(3), t1: +Math.min(S.duration, t + 2).toFixed(3) });
   changedNow(); if (tools) tools.use('move'); remount('u:' + id); status('Text layer added · drag it, resize it, trim it on the timeline'); }
+function muteLayers(ks) { if (!S || S.mirror || !ks || !ks.length) return; const R = S.review; let nowOff = null;
+  const elOf = k => { if (k.startsWith('u:')) { for (const b of S.beats) { const e = b.els.find(x => 'u:' + x._uid === k); if (e) return e; } return null; } const [bid, i] = k.split(':'); const b = S.beats.find(x => x.id === bid); return b && b.els[+i]; };
+  ks.forEach(k => {
+    if (k.startsWith('m:')) { const m = (R.media || []).find(x => 'm:' + x.id === k); if (!m) return; m.off = !m.off; if (!m.off) delete m.off; if (nowOff === null) nowOff = !!m.off; return; }
+    const e = elOf(k), wasOff = e ? (e._off !== undefined ? !!e._off : !!e.off) : false; if (nowOff === null) nowOff = !wasOff;
+    const L = R.layers ||= {}; L.mute ||= []; const i = L.mute.indexOf(k); if (i >= 0) L.mute.splice(i, 1); else L.mute.push(k); });
+  cleanLayers(R); changedNow(); remount(ks[0]); status((ks.length > 1 ? ks.length + ' layers ' : 'Layer ') + (nowOff ? 'muted (off)' : 'on again') + ' · Shift+E to switch back'); }
 const plainLabel = e => { if (e.three) return '3D ' + (e.three.scene || 'scene') + ((e.three.opts || {}).half ? ' ' + e.three.opts.half : ''); const t = document.createElement('div'); t.innerHTML = e.html || ''; t.querySelectorAll('[aria-hidden="true"],style,script,svg').forEach(x => x.remove()); const s2 = (t.textContent || '').replace(/\s+/g, ' ').trim(); return s2 ? s2.slice(0, 40) : 'graphic ' + ((e.cls || '').split(' ')[0] || ''); };
 function layersText(s) { const L = s.review.layers; if (!L) return []; const out = [], base = orig[s.id] || [], del = L.deleted || [];
   const elAt = k => { const [bid, i] = k.split(':'); const b = base.find(x => x.id === bid); return b && b.els[+i]; };
@@ -242,6 +255,10 @@ function layersText(s) { const L = s.review.layers; if (!L) return []; const out
   if (del.length) out.push('Deleted layers (remove them from the plan): ' + del.map(name).join('; '));
   (L.added || []).forEach(a => { const k = 'u:' + a.id, tm = (s.timeline || {})[k], mv = (s.review.moves || {})[k];
     out.push(`My new text layer “${a.text}”: show ${(tm ? +tm.in : a.t0).toFixed(2)}–${(tm ? +tm.out : a.t1).toFixed(2)} s, centered across the frame at 62% height${mv ? `, then moved x${mv.x >= 0 ? '+' : ''}${mv.x} y${mv.y >= 0 ? '+' : ''}${mv.y} (cqw of frame width)${Math.abs((mv.s || 1) - 1) > .001 ? ', size ' + Math.round(mv.s * 100) + '%' : ''}` : ''}. Build it in the brand text style at exactly that place and time.`); });
+  if ((L.mute || []).length) { const isOffInPlan = k => { const e = elAt(k); return !!(e && e.off); };
+    const off = L.mute.filter(k => !isOffInPlan(k)), on = L.mute.filter(isOffInPlan);
+    if (off.length) out.push('Muted layers (Shift+E): keep them in the plan but switched off (set off: true on the element; never render them): ' + off.map(name).join('; '));
+    if (on.length) out.push('Unmuted layers: switch them back on (remove off from the element): ' + on.map(name).join('; ')); }
   if ((L.order || []).length) out.push('Layer order I set (back → front, keep exactly; later = in front): ' + L.order.filter(k => !del.includes(k) && (!k.startsWith('u:') || added(k))).map(name).join(' · '));
   return out; }
 
@@ -394,6 +411,7 @@ async function poll() {
 async function pullNewSequences() {
   const f = await fh.getFile(); if (f.lastModified === lastFileStamp) return; lastFileStamp = f.lastModified;
   const data = normalize(JSON.parse(await f.text())); if (!data) return;
+  { const was = dirty(); if (takeBrand(data)) { if (!was) savedSig = sig(); status('Brand updated ✓'); } }
   const added = data.sequences.filter(s => !P.sequences.some(x => x.id === s.id));
   const key = s => JSON.stringify([s.version, s.badge, s.beats, s.css, s.media, s.suggest || null, s.ideas || null, s.mirror || null]);
   const done = s => { const j = jobs[(s.name || s.id).toLowerCase()]; return j && j.state === 'done'; };
@@ -526,12 +544,12 @@ async function askIdeas(note) {
   paintTabs(); pollSoon();
 }
 /* screenshots go into "Planner App/direct/" (Claude reads them there); without the folder they stay inside the project file */
-async function saveImage(name, dataURL) {
+async function saveImage(name, dataURL, folder = 'direct') {
   const dir = await projectDir('readwrite'); if (!dir) return null;
   try { let base = dir, pre = ''; try { base = await dir.getDirectoryHandle('Planner App'); pre = 'Planner App/'; } catch (e) {}
-    const sub = await base.getDirectoryHandle('direct', { create: true }); const fname = name.replace(/[\\/:*?"<>|]+/g, '-');
+    const sub = await base.getDirectoryHandle(folder, { create: true }); const fname = name.replace(/[\\/:*?"<>|]+/g, '-');
     const blob = await (await fetch(dataURL)).blob(); const w = await (await sub.getFileHandle(fname, { create: true })).createWritable(); await w.write(blob); await w.close();
-    const rel = pre + 'direct/' + fname; mediaCache.set(rel, URL.createObjectURL(blob)); return rel; } catch (e) { return null; }
+    const rel = pre + folder + '/' + fname; mediaCache.set(rel, URL.createObjectURL(blob)); return rel; } catch (e) { return null; }
 }
 async function askLooks(b, note) {
   if (!P || !S) return;
@@ -545,6 +563,32 @@ async function askLooks(b, note) {
   if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
   $('#sendMsg').innerHTML = `Looks for <b>${esc(seqName())} ${esc(b.id)}</b> asked ✓ ` + sentText(mode, line, 'They show in the Direct panel when ready.');
   status(mode === 'code' ? `Claude Code is making looks for ${b.id}` : mode === 'copied' ? 'Copied: ' + line : 'Saved');
+  paintTabs(); pollSoon();
+}
+
+/* ---------- 🎨 Brand: the project's brand guidelines (colors, fonts, logos, rules), saved in the project file ---------- */
+let brandWin = null;
+function closeBrand() { if (brandWin) { const w = brandWin; brandWin = null; w.close(); } }
+function paintBrandBtn() { const b = $('#brandBtn'); if (!b) return; const n = P ? brandCount(P.brand) : 0; b.classList.toggle('has', !!n); b.title = n ? 'Brand guidelines of this project (Claude uses them in every request)' : 'No brand yet: click to add colors, fonts, logos and rules'; }
+/* take Claude's brand from the file when you haven't changed yours since it was read */
+function takeBrand(data) { const disk = JSON.stringify(data.brand || null), mine = JSON.stringify(P.brand || null);
+  if (disk === mine || mine !== brandBase) { if (disk === mine) brandBase = disk; return false; }
+  P.brand = data.brand ? JSON.parse(disk) : undefined; if (!P.brand) delete P.brand; brandBase = disk; paintBrandBtn(); if (brandWin) brandWin.refresh(); return true; }
+$('#brandBtn').onclick = () => { if (!P) return; if (brandWin) { closeBrand(); return; }
+  brandWin = openBrand({ P, status, saveImage, loadImage: rel => mediaSrc({ id: rel, file: rel }),
+    onChange: () => { paintBrandBtn(); paintTitle(); },
+    onAsk: askBrand, busy: () => { const j = jobs.brand; return !!(j && j.state !== 'done' && j.state !== 'error'); },
+    onClose: () => { brandWin = null; paintBrandBtn(); } }); };
+async function askBrand(note) {
+  if (!P) return;
+  const ok = await save({ kind: 'brand', sequence: 'brand', at: new Date().toISOString(),
+    summary: `Fill in / update the project's brand guidelines in the top-level "brand" field of the project file (the Planner's 🎨 Brand window). Take them from the project's CLAUDE.md brand rules${(P.brand && P.brand.links) ? ', the brand links (' + P.brand.links + ')' : ''} and what the existing graphics use. Format: brand = { colors: [{ name, hex, use }], fonts: [{ role, family, weight, use }], logos: [{ name, file }] (file = path relative to the project folder; copy logo files into "Planner App/brand/"), rules: "short lines: text style, caption style, do's and don'ts", links: "brand website / guideline links" }. Keep what I already wrote unless it is wrong; add what is missing. Do not change any sequence.${note ? ' What I want: ' + note : ''}` });
+  if (!ok) return;
+  const line = '/planner brand';
+  jobs.brand = { seq: 'Brand', pct: 0, step: 'Filling the brand', state: 'waiting', since: new Date().toISOString() };
+  const mode = await dispatch(line, ['Brand']);
+  if (mode !== 'code') jobs.brand.step = 'Paste the line in the Claude chat';
+  status(mode === 'code' ? 'Claude Code is filling the brand' : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
 }
 
@@ -587,7 +631,9 @@ function summary(kind) {
   if (ideaText(S)) L.push(ideaText(S));
   mediaText(S).forEach(x => L.push(x));
   layersText(S).forEach(x => L.push(x));
+  marksText(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
+  if (brandText(P)) L.push(brandText(P));
   return L.join('\n');
 }
 async function send(kind) {
@@ -606,9 +652,9 @@ $('#reviseBtn').onclick = () => send('revise');
 /* one button: render this exact version and apply it to its Premiere sequence (no plan changes) */
 $('#renderBtn').onclick = async () => {
   if (!P || !S) return;
-  const R = S.review, edits = Object.values(R.picks).filter(Boolean).length + Object.values(R.notes).filter(x => x && x.trim()).length + Object.keys(S.timeline).length + Object.keys(R.moves || {}).length + (R.cams || []).length + (R.drawings || []).length + ((R.general || '').trim() ? 1 : 0) + layerCount(R);
+  const R = S.review, edits = Object.values(R.picks).filter(Boolean).length + Object.values(R.notes).filter(x => x && x.trim()).length + Object.keys(S.timeline).length + Object.keys(R.moves || {}).length + (R.cams || []).length + (R.drawings || []).length + ((R.general || '').trim() ? 1 : 0) + layerCount(R) + markCount(R);
   if (edits && !(await ask(`${seqName()} has notes or edits that Claude hasn't done yet. Export ${S.version || 'this version'} as it is now (your notes are ignored)?`, 'Export as is', 'Cancel'))) return;
-  const ok = await save({ kind: 'apply', sequence: S.id, at: new Date().toISOString(), summary: `Export ${seqName()} ${S.version || ''}: render exactly as it is in the planner and apply it to its Premiere sequence. No plan changes.` });
+  const ok = await save({ kind: 'apply', sequence: S.id, at: new Date().toISOString(), summary: `Export ${seqName()} ${S.version || ''}: render exactly as it is in the planner and apply it to its Premiere sequence. No plan changes.${muteText(S)}` });
   if (!ok) return;
   const line = `/planner export ${seqName()}`;
   jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
@@ -621,9 +667,16 @@ $('#renderBtn').onclick = async () => {
 };
 
 
+function muteText(s) { const L = (s.review || {}).layers, off = []; (orig[s.id] || []).forEach(b => b.els.forEach((e, i) => { const k = b.id + ':' + i, m = L && (L.mute || []).includes(k); if (m ? !e.off : e.off) off.push(k); }));
+  return off.length ? ` Muted layers (switched off, do not render them): ${off.join(', ')}.` : ''; }
 /* ---------- edits: count, undo / redo (Ctrl+Z / Ctrl+Y) ---------- */
-function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0) + layerCount(r); }
-const layerCount = r => r.layers ? (r.layers.deleted || []).length + (r.layers.added || []).length + ((r.layers.order || []).length ? 1 : 0) : 0;
+function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0) + layerCount(r) + markCount(r); }
+const layerCount = r => r.layers ? (r.layers.deleted || []).length + (r.layers.added || []).length + (r.layers.mute || []).length + ((r.layers.order || []).length ? 1 : 0) : 0;
+const markCount = r => (r.marks || []).filter(m => (m.note || '').trim()).length;
+/* markers with a comment: Claude does each one at its exact time, then the marker goes away (empty markers are only your bookmarks) */
+function marksText(s) { const list = ((s.review || {}).marks || []).filter(m => (m.note || '').trim()); if (!list.length) return [];
+  const bs = orig[s.id] || s.beats || [];
+  return ['Markers (do each one at exactly its time, then remove that marker from review.marks; keep markers that have no note): ' + list.map(m => { const b = bs.find(x => m.t >= x.t0 && m.t < x.t1); return `[marker ${m.id}] ${m.t.toFixed(2)} s${b ? ' (' + b.id + ')' : ''}: ${m.note.trim()}`; }).join(' | ')]; }
 const hist = {}, redo = {}, last = {};
 const snap = s => JSON.stringify({ review: s.review, timeline: s.timeline });
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/.test(a.type || ''))); };
@@ -674,13 +727,15 @@ function deriveBeats(F) {
 }
 function deriveMirror(F) {
   const nb = deriveBeats(F); if (nb) { F.beats = nb; orig[F.id] = JSON.parse(JSON.stringify(nb)); }
-  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.direct = { note: '', shots: [] }; R.looks = {}; R.idea = ''; R.general = ''; F.timeline = {};
+  const R = F.review; R.moves = {}; R.cams = []; R.media = []; R.picks = {}; R.notes = {}; R.drawings = []; R.direct = { note: '', shots: [] }; R.looks = {}; R.idea = ''; R.general = ''; R.marks = []; R.layers = {}; F.timeline = {};
   (F.mirror || []).forEach(m => { const src = P.sequences.find(s => s.id === m.seq); if (!src) return; const off = +m.offset || 0, pre = m.prefix || '';
     Object.entries(src.review.moves || {}).forEach(([k, v]) => { R.moves[pre + k] = { ...v }; });
     Object.entries(src.timeline || {}).forEach(([k, v]) => { F.timeline[pre + k] = { in: +(v.in + off).toFixed(3), out: +(v.out + off).toFixed(3), off: v.off || 0 }; });
     (src.review.cams || []).forEach(c => R.cams.push({ ...c, t: +(c.t + off).toFixed(3) }));
     (src.review.media || []).forEach(x => R.media.push({ ...x, id: pre + x.id, t0: +(x.t0 + off).toFixed(3), t1: +(x.t1 + off).toFixed(3) }));
-    Object.entries(src.review.picks || {}).forEach(([k, v]) => { if (v) R.picks[pre + k] = v; }); });
+    Object.entries(src.review.picks || {}).forEach(([k, v]) => { if (v) R.picks[pre + k] = v; });
+    (src.review.marks || []).forEach(x => R.marks.push({ ...x, id: pre + x.id, t: +(x.t + off).toFixed(3) }));
+    const SL = src.review.layers || {}; ['deleted', 'mute'].forEach(f => (SL[f] || []).forEach(k => { if (!k.startsWith('u:')) (R.layers[f] ||= []).push(pre + k); })); });
   R.cams.sort((a, b) => a.t - b.t);
 }
 
@@ -721,7 +776,7 @@ function seqText(s) {
     if (r.picks[b.id]) bits.push(r.picks[b.id]); if ((r.notes[b.id] || '').trim()) bits.push('note: ' + r.notes[b.id].trim());
     const mv = Object.entries(r.moves || {}).filter(([k]) => k.startsWith(b.id + ':') && !/\bguide\b/.test((b.els[+k.split(':')[1]] || {}).cls || '')); if (mv.length) bits.push('moved (apply exactly, cqw of frame width): ' + mv.map(([k, m]) => `el#${k.split(':')[1]} x${m.x >= 0 ? '+' : ''}${m.x} y${m.y >= 0 ? '+' : ''}${m.y}${Math.abs((m.s || 1) - 1) > .001 ? ' size ' + Math.round(m.s * 100) + '%' : ''}`).join('; '));
     const tm = Object.entries(s.timeline || {}).filter(([k]) => k.startsWith(b.id + ':')); if (tm.length) bits.push('timeline (apply exactly): ' + tm.map(([k, v]) => `el#${k.split(':')[1]} in ${(+v.in).toFixed(2)} s, out ${(+v.out).toFixed(2)} s${Math.abs(v.off || 0) > .004 ? ' (whole clip moved)' : ''}`).join('; '));
-    const ks = (r.cams || []).filter(k => k.t >= b.t0 && k.t < b.t1); if (ks.length) bits.push('my zoom/pan (use exactly): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y}%`).join('; '));
+    const ks = (r.cams || []).filter(k => k.t >= b.t0 && k.t < b.t1); if (ks.length) bits.push('my zoom/pan (use exactly): ' + ks.map(k => `${k.t.toFixed(2)} s zoom ${Math.round(k.s * 100)}% x ${k.x}% y ${k.y || 0}%${k.ease === 'cut' ? ' (cut / jump to it)' : k.ease === 'lin' ? ' (linear into it)' : ''}`).join('; '));
     (r.drawings || []).filter(d => d.beat === b.id).forEach(d => bits.push(`drawing at 0:${d.t.toFixed(1)}${d.note ? ': ' + d.note : ''} (sketch in project file)`));
     { const lt = lookText(s, b.id); if (lt) bits.push(lt.slice(3)); }
     if (bits.length) L.push(`${b.id} (${b.title}): ${bits.join(' · ')}`); });
@@ -729,6 +784,7 @@ function seqText(s) {
   if (ideaText(s)) L.push(ideaText(s));
   mediaText(s).forEach(x => L.push(x));
   layersText(s).forEach(x => L.push(x));
+  marksText(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
 }
@@ -742,7 +798,7 @@ $('#applyAllBtn').onclick = async () => {
   if (!P) return; checkpoint(true);
   const list = P.sequences.filter(s => !s.mirror && (editCount(s) || s.review.approved));
   if (!list.length) { status('No changes yet in any tab'); return; }
-  const summary = ['Apply all my changes (revise every tab listed; tabs marked APPROVED need no changes unless they have notes):'].concat(...list.map(seqText)).join('\n');
+  const summary = ['Apply all my changes (revise every tab listed; tabs marked APPROVED need no changes unless they have notes):'].concat(...list.map(seqText), brandText(P) ? [brandText(P)] : []).join('\n');
   remember(list.filter(s => !s.review.approved || editCount(s)));
   const ok = await save({ kind: 'revise-all', sequence: 'all', sequences: list.map(s => s.id), at: new Date().toISOString(), summary });
   if (!ok) return;

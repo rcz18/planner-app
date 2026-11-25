@@ -1,6 +1,6 @@
 /* Progress: the queue of Claude Code requests (now / waiting / done) in a window, plus the sounds. */
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-export const KIND = { revise: 'Revise', 'revise-all': 'Apply all changes', 'apply all changes': 'Apply all changes', ideas: 'Suggestions', suggest: 'Looks', apply: 'Apply', export: 'Export', new: 'New sequence' };
+export const KIND = { revise: 'Revise', 'revise-all': 'Apply all changes', 'apply all changes': 'Apply all changes', ideas: 'Suggestions', suggest: 'Looks', apply: 'Apply', export: 'Export', new: 'New sequence', brand: 'Brand' };
 export const kindName = k => KIND[k] || (k ? k[0].toUpperCase() + k.slice(1) : 'Request');
 const ago = iso => { if (!iso) return ''; const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
 const clock = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';

@@ -17,6 +17,8 @@ export function camAt(cam, t) {
   let f = Math.min(1, Math.max(0, (t - k[0]) / (n[0] - k[0]))); if (n[6] === 'e') f = f * f * (3 - 2 * f);
   const o = k.map((v, j) => j > 0 && j < 5 ? v + (n[j] - v) * f : v); o[7] = (k[7] || 0) + ((n[7] || 0) - (k[7] || 0)) * f; return o;
 }
+/* a layer can be switched off (Shift+E in the timeline): e.off in the plan, e._off = what the timeline shows now */
+export const offOf = e => e._off !== undefined ? !!e._off : !!e.off;
 const grayAt = (all, t) => all.some(b => (b.gray || []).some(g => t >= g[0] && t < g[1]));
 
 function loadMatte(m, onReady) {
@@ -74,7 +76,7 @@ export function createPreview(host, project, src) {
     const keys = (project.review && project.review.cams) || []; if (!keys.length) return baseCams;
     const inUser = t => all.some(b => t >= b.t0 && t < b.t1 && keys.some(k => k.t >= b.t0 && k.t < b.t1));
     const out = baseCams.filter(c => !inUser(c[0]));
-    keys.forEach(k => { const b = camAt(baseCams, k.t); out.push([k.t, k.s, k.x, b[3] || 0, b[4] || 0, false, 'e', k.y]); });
+    keys.forEach(k => { const b = camAt(baseCams, k.t); out.push([k.t, k.s, k.x, b[3] || 0, b[4] || 0, k.ease === 'cut', k.ease === 'lin' ? '' : 'e', k.y || 0]); });
     return out.sort((a, b) => a[0] - b[0]);
   }
   function applyMoves() { const mv = (project.review && project.review.moves) || {};
@@ -91,10 +93,10 @@ export function createPreview(host, project, src) {
     scrim.style.opacity = c[4] || 0; all.flatMap(x => x.fx || []).forEach(f => el.classList.toggle('fx-' + f[2], t >= f[0] && t < f[1]));
     if (sbg) { const sc = scs.find(b => t >= b.scene.t0 && t < b.scene.t1); sbg.classList.toggle('on', !!sc); sbg.classList.toggle('noperson', !!sc && sc.scene.person === false); pc.classList.toggle('on', !!sc && sc.scene.person !== false);
       if (sc && sc.scene.person !== false) { try { pctx.globalCompositeOperation = 'source-over'; pctx.clearRect(0, 0, 640, 360); pctx.drawImage(v, 0, 0, 640, 360); const m = sc.scene; if (m.alpha) { const i = Math.max(0, Math.min(m.n - 1, Math.round(t * FPSRC) - m.f0)); pctx.globalCompositeOperation = 'destination-in'; pctx.drawImage(m.alpha, (i % m.cols) * m.w, Math.floor(i / m.cols) * m.h, m.w, m.h, 0, 0, 640, 360); pctx.globalCompositeOperation = 'source-over'; } } catch (err) {} } }
-    ovs.forEach(([e, d]) => { d.classList.toggle('on', t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
+    ovs.forEach(([e, d]) => { d.classList.toggle('on', !offOf(e) && t >= e.in && t < e.out); if (e.fly !== undefined) d.classList.toggle('flying', t >= e.fly);
       d.querySelectorAll('[data-glow]').forEach(g => g.classList.toggle('glow', t >= +g.dataset.glow)); d.querySelectorAll('[data-show]').forEach(g => g.classList.toggle('show', t >= +g.dataset.show)); });
     syncAnims(t);
-    threes.forEach(r => { const on = t >= r.e.in && t < r.e.out; r.cv.style.visibility = on ? '' : 'hidden';   // a 3D layer never stays on screen outside its time, even if the plan's CSS forgets to hide it
+    threes.forEach(r => { const on = !offOf(r.e) && t >= r.e.in && t < r.e.out; r.cv.style.visibility = on ? '' : 'hidden';   // a 3D layer never stays on screen outside its time, even if the plan's CSS forgets to hide it
       if (r.inst && on) { try { r.inst.render(t - r.e.in, t); } catch (err) {} } });
   }
   async function start3(r) {
