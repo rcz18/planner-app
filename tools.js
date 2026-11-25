@@ -1,5 +1,5 @@
 /* Preview tools: Move / Resize, Zoom / Pan (your camera keys), Draw (+ comment), Dictate. */
-import { camAt } from './engine.js?v=17.7';
+import { camAt } from './engine.js?v=17.8';
 const FPS = 30;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -28,11 +28,13 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
     if (mode === 'draw' && m !== 'draw') closeDraw();
     mode = mode === m ? '' : m;
     btns.forEach(b => b.setAttribute('aria-pressed', b.dataset.m === mode ? 'true' : 'false'));
-    fr.classList.toggle('pa-move', mode === 'move'); fr.classList.toggle('pa-cam', mode === 'cam');
+    fr.classList.toggle('pa-move', mode === 'move'); fr.classList.toggle('pa-cam', mode === 'cam' || !mode);
     if (mode) v.pause();
     if (mode === 'draw') openDraw();
     paintHint(); placeBox();
   }
+  fr.classList.add('pa-cam');   // no tool: scroll = zoom, drag = pan, click = play / pause
+  setTimeout(() => { try { paintHint(); } catch (e) {} }, 0);
   btns.forEach(b => b.onclick = () => setMode(b.dataset.m));
   const changed = () => { onChange && onChange(); };
   const fw = () => fr.clientWidth || fr.getBoundingClientRect().width || host.getBoundingClientRect().width || 1000;
@@ -142,7 +144,7 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
       if (ev.shiftKey) { pick(k, true); if (!group.includes(k)) return; } else if (!group.includes(k)) pick(k); else { sel = k; paintHint(); }
       mdrag = { x0: ev.clientX, y0: ev.clientY, m0: new Map(group.map(g => [g, isM(g) ? { x: mEntry(g).x, y: mEntry(g).y } : { ...(R.moves[g] || { x: 0, y: 0, s: 1 }) }])), moved: false, k, solo: !ev.shiftKey && group.length > 1 };
       fr.setPointerCapture(ev.pointerId); }
-    else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); cdrag = { x0: ev.clientX, y0: ev.clientY, k0: { ...k }, k }; fr.setPointerCapture(ev.pointerId); }
+    else if (mode === 'cam' || (!mode && ev.button === 0)) { if (!mode && ev.composedPath().some(n => n.classList && n.classList.contains('pa-media'))) return; ev.preventDefault(); cdrag = { x0: ev.clientX, y0: ev.clientY, k0: null, k: null }; fr.setPointerCapture(ev.pointerId); }
   });
   root.addEventListener('pointermove', ev => {
     if (mode === 'move' && rdrag) { const q = Math.hypot(ev.clientX - rdrag.cx, ev.clientY - rdrag.cy) / rdrag.d0; rdrag.s0.forEach((s0, k) => scaleKey(k, s0 * q)); redraw(); return; }
@@ -150,14 +152,14 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
       if (!mdrag.moved && Math.abs(ev.clientX - mdrag.x0) + Math.abs(ev.clientY - mdrag.y0) < 3) return; mdrag.moved = true;
       mdrag.m0.forEach((m0, k) => { if (isM(k)) { const m = mEntry(k); if (m) { m.x = +(m0.x + dx).toFixed(2); m.y = +(m0.y + dy).toFixed(2); } } else R.moves[k] = { x: +((+m0.x || 0) + dx).toFixed(2), y: +((+m0.y || 0) + dy).toFixed(2), s: +m0.s || 1 }; });
       redraw(); }
-    else if (mode === 'cam' && cdrag) { cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(pv.time()); paintHint(); }
+    else if ((mode === 'cam' || !mode) && cdrag) { if (!cdrag.k) { if (Math.abs(ev.clientX - cdrag.x0) + Math.abs(ev.clientY - cdrag.y0) < 4) return; v.pause(); cdrag.k = camKey(); cdrag.k0 = { ...cdrag.k }; } cdrag.k.x = +(cdrag.k0.x + (ev.clientX - cdrag.x0) * 100 / fr.clientWidth).toFixed(2); cdrag.k.y = +(cdrag.k0.y + (ev.clientY - cdrag.y0) * 100 / fr.clientHeight).toFixed(2); pv.render(pv.time()); paintHint(); }
   });
   root.addEventListener('pointerup', () => { if (rdrag) { rdrag = null; changed(); }
     if (mdrag) { const d = mdrag; mdrag = null; if (d.moved) changed(); else if (d.solo) pick(d.k); }
-    if (cdrag) { cdrag = null; changed(); tl.redraw(); } });
-  root.addEventListener('wheel', ev => {
+    if (cdrag) { const moved = !!cdrag.k; cdrag = null; if (moved) { changed(); tl.redraw(); } else if (!mode) { if (v.paused) pv.playFrom(pv.time()); else v.pause(); } } });
+  host.addEventListener('wheel', ev => {   // on the light-DOM host: Chrome may skip wheel listeners that sit only on a shadow root
     if (mode === 'move' && sel) { ev.preventDefault(); setScale(scaleOf(sel) * (ev.deltaY < 0 ? 1.05 : 1 / 1.05)); changed(); }
-    else if (mode === 'cam') { ev.preventDefault(); const k = camKey(); k.s = +Math.max(1, Math.min(4, k.s * (ev.deltaY < 0 ? 1.04 : 1 / 1.04))).toFixed(3); pv.render(pv.time()); paintHint(); changed(); tl.redraw(); }
+    else if (mode === 'cam' || !mode) { ev.preventDefault(); v.pause(); const k = camKey(); k.s = +Math.max(1, Math.min(4, k.s * (ev.deltaY < 0 ? 1.04 : 1 / 1.04))).toFixed(3); pv.render(pv.time()); paintHint(); changed(); tl.redraw(); }
   }, { passive: false });
   /* ---------- Zoom / Pan: one key per frame time ---------- */
   let cdrag = null;
@@ -185,10 +187,10 @@ export function attachTools({ P, pv, tl, host, bar, hint, onChange, onAddMedia, 
         hint.innerHTML = `<b>${esc(label(sel))}</b> ${m.t0.toFixed(2)}–${m.t1.toFixed(2)} s ${fieldsHTML}${alnHTML}<input type="text" class="mnote" data-h="mnote" placeholder="What should Claude do with it?" value="${esc(m.note || '')}"> <button type="button" data-h="mdel">Delete</button>`; }
       else hint.innerHTML = `<b>${esc(label(sel))}</b> · drag to move · corners resize · arrows nudge ${fieldsHTML}${alnHTML}${anyMoved ? '<button type="button" data-h="mreset">Reset</button>' : ''}`;
       paintFields(); }
-    else if (mode === 'cam') { hint._sel = null; const t = tNow(), k = R.cams.find(x => Math.abs(x.t - t) < 0.5 / FPS), b = beatAt(t), n = R.cams.filter(x => x.t >= b.t0 && x.t < b.t1).length;
+    else if (mode === 'cam' || (!mode && R.cams.some(x => Math.abs(x.t - tNow()) < 0.5 / FPS))) { hint._sel = null; const t = tNow(), k = R.cams.find(x => Math.abs(x.t - t) < 0.5 / FPS), b = beatAt(t), n = R.cams.filter(x => x.t >= b.t0 && x.t < b.t1).length;
       hint.innerHTML = `Camera at ${t.toFixed(2)} s: scroll to zoom · drag to pan${k ? ` · zoom ${Math.round(k.s * 100)}% <button type="button" data-h="cdel">Remove this key</button>` : ''}${n ? ` · ${n} key${n > 1 ? 's' : ''} in ${b.id} (yours replace Claude’s camera there) <button type="button" data-h="cclear">Clear ${b.id}</button>` : ''}`; }
     else if (mode === 'draw') { hint._sel = null; hint.textContent = 'Draw on the frame, write what you want, then Save.'; }
-    else { hint._sel = null; hint.textContent = ''; }
+    else { hint._sel = null; hint.textContent = 'On the preview: scroll = zoom in / out · drag = move the screen (pan) · click = play / pause'; }
   }
   /* scrub a number like Premiere: drag left / right (Shift = 10×), or click it to type */
   hint.addEventListener('pointerdown', e => { const em = e.target.closest && e.target.closest('.pf em'); if (!em || em.querySelector('input') || !group.length) return;
