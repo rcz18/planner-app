@@ -382,3 +382,9 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .brLogo small{color:var(--dim);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brLogo .btn{align-self:flex-end}
 .brBox footer .brSaved{color:var(--dim);font-size:11px;white-space:nowrap}
 @media (max-width:800px){.brBody{grid-template-columns:1fr}.brFont{grid-template-columns:1fr 1fr}}
+
+/* ---------- v17.7: ✂ cut V1 (S) ---------- */
+.clip.cV .cut.uc{background:#ff5a3c;width:2px;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+.clip.cV .vOff{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,rgba(0,0,0,.72) 0 6px,rgba(255,90,60,.55) 6px 9px);pointer-events:none;border-left:2px solid #ff5a3c;border-right:2px solid #ff5a3c}
+.clip.cV .vSelBox{position:absolute;top:0;bottom:0;outline:2px solid #ffe08a;outline-offset:-2px;background:rgba(255,224,138,.12);pointer-events:none}
+.tlBtn.tlCutB{font-weight:700}
