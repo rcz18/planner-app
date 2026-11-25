@@ -1,7 +1,8 @@
-import { createPreview } from './engine.js?v=17.7';
-import { createTimeline, fmtTC } from './timeline.js?v=17.7';
-import { attachTools, wireMic } from './tools.js?v=17.7';
-import { openBrand, brandText, brandCount } from './brand.js?v=17.7';
+import { createPreview } from './engine.js?v=17.8';
+import { createTimeline, fmtTC } from './timeline.js?v=17.8';
+import { attachTools, wireMic } from './tools.js?v=17.8';
+import { openBrand, brandText, brandCount } from './brand.js?v=17.8';
+import { wireRefs, refsText } from './refs.js?v=17.8';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
@@ -23,7 +24,7 @@ let P = null;            // open project
 let S = null;            // current sequence
 const orig = {};         // Claude's plan per sequence, saved back unchanged
 let fh = null, savedSig = '';
-let pv = null, tl = null, tools = null, mediaURL = null;
+let pv = null, tl = null, tools = null, mediaURL = null, refs = null;
 
 const sig = () => P ? JSON.stringify([P.sequences.filter(s => !s.mirror).map(s => [s.review, s.timeline]), P.brand || null]) : '';
 let brandBase = 'null';   // the brand as it was last read from / written to the file (so Claude's brand updates come in when you haven't edited it)
@@ -543,6 +544,14 @@ async function askIdeas(note) {
   status(mode === 'code' ? `Claude Code is making 4 suggestions for ${seqName()}` : mode === 'copied' ? 'Copied: ' + line : 'Saved');
   paintTabs(); pollSoon();
 }
+/* any file (inspiration images / videos) into "Planner App/<folder>/" of the linked project folder */
+async function saveFile(file, name, folder = 'refs') {
+  const dir = await projectDir('readwrite'); if (!dir) return null;
+  try { let base = dir, pre = ''; try { base = await dir.getDirectoryHandle('Planner App'); pre = 'Planner App/'; } catch (e) {}
+    const sub = await base.getDirectoryHandle(folder, { create: true }); const fname = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 140);
+    const w = await (await sub.getFileHandle(fname, { create: true })).createWritable(); await w.write(file); await w.close();
+    const rel = pre + folder + '/' + fname; mediaCache.set(rel, URL.createObjectURL(file)); return rel; } catch (e) { return null; }
+}
 /* screenshots go into "Planner App/direct/" (Claude reads them there); without the folder they stay inside the project file */
 async function saveImage(name, dataURL, folder = 'direct') {
   const dir = await projectDir('readwrite'); if (!dir) return null;
@@ -594,6 +603,7 @@ async function askBrand(note) {
 
 /* ---------- beats panel ---------- */
 function paintBeats() {
+  setTimeout(() => refs && refs.refresh(), 0);
   const R = S.review; paintDirectBtn(); paintIdeasBtn();
   $('#beats').innerHTML = orig[S.id].map(b => `
     <article class="beat" data-id="${b.id}" data-t0="${b.t0}" data-t1="${b.t1}">
@@ -633,6 +643,7 @@ function summary(kind) {
   layersText(S).forEach(x => L.push(x));
   marksText(S).forEach(x => L.push(x));
   vcutLines(S).forEach(x => L.push(x));
+  refsText(S, orig[S.id]).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   if (brandText(P)) L.push(brandText(P));
   return L.join('\n');
@@ -675,7 +686,7 @@ function editCount(s) { const r = s.review; return Object.values(r.picks).filter
 const layerCount = r => r.layers ? (r.layers.deleted || []).length + (r.layers.added || []).length + (r.layers.mute || []).length + ((r.layers.order || []).length ? 1 : 0) : 0;
 const markCount = r => (r.marks || []).filter(m => (m.note || '').trim()).length + vcutCount(r);
 /* ✂ your cuts on V1 (S in the timeline): review.vcut = { splits, off } */
-const vcutCount = r => r.vcut ? (r.vcut.splits || []).length + (r.vcut.off || []).length : 0;
+const vcutCount = r => (r.vcut ? (r.vcut.splits || []).length + (r.vcut.off || []).length : 0) + (r.refs ? Object.values(r.refs).reduce((n, v) => n + (v || []).length, 0) : 0);
 function vcutLines(s) { const o = (s.review || {}).vcut; if (!o || !vcutCount(s.review)) return [];
   const seq = (s.place && s.place.sequence) || 'the Premiere sequence of this tab', off = o.off || [], sp = o.splits || [];
   const L = [];
@@ -702,7 +713,7 @@ function restore(str) {
   const o = JSON.parse(str), lay0 = JSON.stringify(S.review.layers || null);
   Object.keys(S.timeline).forEach(k => delete S.timeline[k]); Object.assign(S.timeline, o.timeline);
   Object.keys(S.review).forEach(k => delete S.review[k]); Object.assign(S.review, o.review);
-  last[S.id] = str; if (JSON.stringify(S.review.layers || null) !== lay0) remount(); else { tl && tl.sync && tl.sync(); tools && tools.sync && tools.sync(); } paintBeats(); paintApprove(); paintTitle();
+  last[S.id] = str; refs && refs.refresh(); if (JSON.stringify(S.review.layers || null) !== lay0) remount(); else { tl && tl.sync && tl.sync(); tools && tools.sync && tools.sync(); } paintBeats(); paintApprove(); paintTitle();
 }
 function undo() { if (!S || S.mirror) return; checkpoint(true); const h = hist[S.id] || []; if (!h.length) { status('Nothing to undo'); return; }
   (redo[S.id] ||= []).push(last[S.id]); restore(h.pop()); status('Undo ✓'); }
@@ -795,6 +806,7 @@ function seqText(s) {
   layersText(s).forEach(x => L.push(x));
   marksText(s).forEach(x => L.push(x));
   vcutLines(s).forEach(x => L.push(x));
+  refsText(s, orig[s.id] || s.beats).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
 }
@@ -862,3 +874,6 @@ if (!canFS) $('#fsNote').hidden = false;
 paintRecent();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 window.__planner = { load: d => { fh = null; return load(normalize(d)); }, peek: () => ({ S, summary: S ? summary('revise') : '', seq: S ? seqText(S).join('\n') : '' }), mountFile: f => mount(f), switchSeq: id => switchSeq(id), seek: t => tl && tl.seek(t), dispatch: (l, n) => dispatch(l, n), _fh: h => { fh = h; } };
+
+/* 📎 inspiration on every note box (paste / drop / pick images and videos) */
+refs = wireRefs({ getS: () => S, saveFile, srcOf: r => mediaSrc({ id: r.id, file: r.file, data: r.data }), onChange: () => { changedNow(); }, status });
