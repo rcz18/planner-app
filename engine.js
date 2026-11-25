@@ -137,7 +137,13 @@ export function createPreview(host, project, src) {
     for (let i = 0; i < cuts.length; i++) { const k = cuts[i]; if (src >= k[2] - 1e-3 && src <= k[3] + 1e-3) { seg = i; return k[0] + (src - k[2]); } } return 0; };
   const time = () => Math.min(DUR, Math.max(0, toPlan(v.currentTime)));
   let raf = null, stopAt = DUR, jumping = false;
+  /* your cuts (S in the timeline): pieces you removed (review.vcut.off) are skipped while playing, like a ripple delete */
+  const offR = () => ((project.review && project.review.vcut && project.review.vcut.off) || []);
+  const inOff = t => offR().find(r => t >= r[0] - 1e-3 && t < r[1] - 1e-3);
   function loop() {
+    { const t0 = time(), sk = !jumping && inOff(t0);
+      if (sk) { if (sk[1] >= Math.min(stopAt, DUR) - 1e-3) { v.pause(); render(sk[0]); return; }
+        jumping = true; v.currentTime = toSrc(sk[1]); raf = requestAnimationFrame(loop); return; } }
     const c = cuts[seg];
     if (!jumping && v.currentTime >= c[3] - 0.5 / FPSRC) {
       if (seg + 1 < cuts.length && cuts[seg + 1][0] < stopAt - 1e-3) { seg++; jumping = true; v.currentTime = cuts[seg][2]; }
@@ -147,7 +153,7 @@ export function createPreview(host, project, src) {
     if (!v.paused) raf = requestAnimationFrame(loop);
   }
   function seek(t) { t = Math.max(0, Math.min(DUR, t)); v.currentTime = toSrc(t); render(t); }
-  function playFrom(s, until) { stopAt = until || DUR; seek(s >= DUR - 0.05 ? 0 : s); v.play().catch(() => {}); }
+  function playFrom(s, until) { stopAt = until || DUR; s = s >= DUR - 0.05 ? 0 : s; for (let i = 0; i < 20; i++) { const sk = inOff(s); if (!sk) break; s = sk[1]; } seek(Math.min(s, DUR)); v.play().catch(() => {}); }
   v.addEventListener('play', () => { cancelAnimationFrame(raf); loop(); });
   v.addEventListener('pause', () => render(time()));
   v.addEventListener('seeked', () => { jumping = false; if (v.paused) render(time()); });
