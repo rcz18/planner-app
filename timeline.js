@@ -1,7 +1,7 @@
 /* Premiere-style timeline: ruler, beats, words, V tracks (text / animation / scene), V1 video,
    camera keyframes and A1 audio. Drag a clip to move it, drag its edges to trim. */
-import { camAt, offOf } from './engine.js?v=17.7';
-import { wireMic } from './tools.js?v=17.7';
+import { camAt, offOf } from './engine.js?v=17.8';
+import { wireMic } from './tools.js?v=17.8';
 const FPS = 30;
 export const fmtTC = t => { t = Math.max(0, t); const f = Math.round(t * FPS), s = Math.floor(f / FPS), fr = f % FPS; return '00:00:' + String(s).padStart(2, '0') + ':' + String(fr).padStart(2, '0'); };
 const fmtS = t => t.toFixed(2) + ' s';
@@ -395,7 +395,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     const i = marks().slice().sort((a, b2) => a.t - b2.t).indexOf(m) + 1, b = beatOf(m.t);
     mkPop.hidden = false;
     mkPop.innerHTML = `<header><b>📍 Marker ${i}</b><span>${fmtTC(m.t).slice(6)} · ${b ? esc(b.id) : ''}</span><button type="button" class="tlBtn" data-mk="x" title="Close (Esc)">✕</button></header>
-      <div class="noteRow"><textarea rows="3" placeholder="Ano gagawin ni Claude dito? (e.g. zoom in sa mukha, lagay ng text na …)"${readOnly ? ' readonly' : ''}></textarea><button type="button" class="mic" title="Dictate">🎤</button></div>
+      <div class="noteRow"><textarea data-slot="mark:${m.id}" rows="3" placeholder="Ano gagawin ni Claude dito? (e.g. zoom in sa mukha, lagay ng text na …)"${readOnly ? ' readonly' : ''}></textarea><button type="button" class="mic" title="Dictate">🎤</button></div>
       <footer><small>Claude does this at exactly ${m.t.toFixed(2)} s on your next Revise / Apply all, then removes the marker.</small>${readOnly ? '' : '<button type="button" class="tlBtn" data-mk="del">🗑 Delete</button>'}<button type="button" class="tlBtn mkOk" data-mk="x">Done</button></footer>`;
     const ta = mkPop.querySelector('textarea'); ta.value = m.note || ''; wireMic(mkPop.querySelector('.mic'), ta);
     ta.addEventListener('input', () => { m.note = ta.value; drawMarks(); });
