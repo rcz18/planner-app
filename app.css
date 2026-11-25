@@ -388,3 +388,13 @@ dialog::backdrop{background:rgba(0,0,0,.6)}.dlgBtns{display:flex;justify-content
 .clip.cV .vOff{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,rgba(0,0,0,.72) 0 6px,rgba(255,90,60,.55) 6px 9px);pointer-events:none;border-left:2px solid #ff5a3c;border-right:2px solid #ff5a3c}
 .clip.cV .vSelBox{position:absolute;top:0;bottom:0;outline:2px solid #ffe08a;outline-offset:-2px;background:rgba(255,224,138,.12);pointer-events:none}
 .tlBtn.tlCutB{font-weight:700}
+
+/* ---------- v17.8: 📎 inspiration on note boxes, zoom/pan on the preview ---------- */
+.refStrip{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0 6px}
+.refStrip .ref{position:relative;width:64px;height:40px;border-radius:5px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,.18);cursor:zoom-in}
+.refStrip .ref img,.refStrip .ref video{width:100%;height:100%;object-fit:cover;display:block}
+.refStrip .ref i{position:absolute;left:4px;bottom:2px;font-style:normal;font-size:10px;color:#fff;text-shadow:0 1px 2px #000}
+.refStrip .ref button{position:absolute;right:1px;top:1px;width:16px;height:16px;border:0;border-radius:3px;background:rgba(0,0,0,.7);color:#fff;font:700 11px/16px Roboto,sans-serif;padding:0;cursor:pointer}
+.refStrip .refAdd{border:1px dashed rgba(255,255,255,.28);background:transparent;color:#cfcfcf;border-radius:5px;padding:4px 8px;font:500 11px Roboto,sans-serif;cursor:pointer}
+.refStrip .refAdd:hover{border-color:var(--orange,#FF7A1A);color:#fff}
+.noteRow.refDrop textarea,.refStrip.refDrop{outline:2px dashed var(--orange,#FF7A1A);outline-offset:2px}
