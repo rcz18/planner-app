@@ -1,6 +1,6 @@
 /* 🎨 Brand: the project's brand guidelines in one window (colors, fonts, logos, rules, links).
    Saved in the project file as the top-level "brand"; every request to Claude carries it. */
-import { wireMic } from './tools.js?v=17.7';
+import { wireMic } from './tools.js?v=17.8';
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const WEIGHTS = ['300', '400', '500', '600', '700', '800', '900'];
 const hexOf = v => { let h = String(v || '').trim().replace(/^#/, ''); if (/^[0-9a-f]{3}$/i.test(h)) h = h.split('').map(c => c + c).join(''); return /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(h) ? '#' + h.toUpperCase() : null; };
