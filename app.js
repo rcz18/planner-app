@@ -1,7 +1,7 @@
-import { createPreview } from './engine.js?v=17.6';
-import { createTimeline, fmtTC } from './timeline.js?v=17.6';
-import { attachTools, wireMic } from './tools.js?v=17.6';
-import { openBrand, brandText, brandCount } from './brand.js?v=17.6';
+import { createPreview } from './engine.js?v=17.7';
+import { createTimeline, fmtTC } from './timeline.js?v=17.7';
+import { attachTools, wireMic } from './tools.js?v=17.7';
+import { openBrand, brandText, brandCount } from './brand.js?v=17.7';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
 import { openProgress, sound, kindName } from './progress.js?v=17.0';
@@ -632,6 +632,7 @@ function summary(kind) {
   mediaText(S).forEach(x => L.push(x));
   layersText(S).forEach(x => L.push(x));
   marksText(S).forEach(x => L.push(x));
+  vcutLines(S).forEach(x => L.push(x));
   if ((R.general || '').trim()) L.push('General: ' + R.general.trim());
   if (brandText(P)) L.push(brandText(P));
   return L.join('\n');
@@ -672,7 +673,15 @@ function muteText(s) { const L = (s.review || {}).layers, off = []; (orig[s.id] 
 /* ---------- edits: count, undo / redo (Ctrl+Z / Ctrl+Y) ---------- */
 function editCount(s) { const r = s.review; return Object.values(r.picks).filter(Boolean).length + Object.values(r.notes).filter(x => x && x.trim()).length + Object.keys(s.timeline || {}).length + Object.keys(r.moves || {}).length + (r.cams || []).length + (r.drawings || []).length + (r.media || []).length + directCount(r) + (r.idea ? 1 : 0) + ((r.general || '').trim() ? 1 : 0) + layerCount(r) + markCount(r); }
 const layerCount = r => r.layers ? (r.layers.deleted || []).length + (r.layers.added || []).length + (r.layers.mute || []).length + ((r.layers.order || []).length ? 1 : 0) : 0;
-const markCount = r => (r.marks || []).filter(m => (m.note || '').trim()).length;
+const markCount = r => (r.marks || []).filter(m => (m.note || '').trim()).length + vcutCount(r);
+/* ✂ your cuts on V1 (S in the timeline): review.vcut = { splits, off } */
+const vcutCount = r => r.vcut ? (r.vcut.splits || []).length + (r.vcut.off || []).length : 0;
+function vcutLines(s) { const o = (s.review || {}).vcut; if (!o || !vcutCount(s.review)) return [];
+  const seq = (s.place && s.place.sequence) || 'the Premiere sequence of this tab', off = o.off || [], sp = o.splits || [];
+  const L = [];
+  if (off.length) L.push(`My cuts (✂ S): REMOVE these parts of ${seq} (plan seconds = sequence seconds from the start of this tab), ripple delete so no gap is left, on every track (Cam A, Cam B, Zoom layers, audio): ${off.map(r => r[0].toFixed(2) + '–' + r[1].toFixed(2) + ' s').join(', ')}. Then move every later graphic, camera key and word earlier by the removed time, update media/cuts, words and duration of this tab, and re-export its preview video.`);
+  if (sp.length) L.push(`My cut points (✂ S) in ${seq}: ${sp.map(t => t.toFixed(2) + ' s').join(', ')}. Razor there on every track; where I only cut (nothing removed), change the angle at that cut (Cam B, or the Zoom layer on Cam A).`);
+  return L; }
 /* markers with a comment: Claude does each one at its exact time, then the marker goes away (empty markers are only your bookmarks) */
 function marksText(s) { const list = ((s.review || {}).marks || []).filter(m => (m.note || '').trim()); if (!list.length) return [];
   const bs = orig[s.id] || s.beats || [];
@@ -785,6 +794,7 @@ function seqText(s) {
   mediaText(s).forEach(x => L.push(x));
   layersText(s).forEach(x => L.push(x));
   marksText(s).forEach(x => L.push(x));
+  vcutLines(s).forEach(x => L.push(x));
   if ((r.general || '').trim()) L.push('General: ' + r.general.trim());
   return L;
 }
