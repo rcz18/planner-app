@@ -123,7 +123,7 @@ export function openDirect(ctx) {
         <div class="dPic"><img alt="screenshot ${i + 1}" title="Click: go to this moment · Double-click: draw on it"><span class="dNum">#${i + 1}</span>${(x.marks || []).length ? '<span class="dDrawn">✏️ ' + x.marks.length + '</span>' : ''}</div>
         <div class="dSide"><div class="dMeta"><b>${tc(x.t)}</b> · ${esc(x.beat || '')}${x.look ? ' · look ' + esc(x.look) : ''}<span class="grow"></span><button type="button" class="btn sm" data-a="draw" title="Draw on it">✏️</button><button type="button" class="btn sm" data-a="del" title="Delete">✕</button></div>
           <div class="dCams">${CAMS.map(c => `<button type="button" class="chip${(x.cam || []).includes(c) ? ' on' : ''}" data-cam="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>
-        <div class="noteRow dCmt"><textarea rows="2" placeholder="Comment: what should happen here?">${esc(x.note || '')}</textarea><button type="button" class="mic" title="Dictate">🎤</button></div></figure>`).join('')
+        <div class="noteRow dCmt"><textarea data-slot="shot:${x.id}" rows="2" placeholder="Comment: what should happen here?">${esc(x.note || '')}</textarea><button type="button" class="mic" title="Dictate">🎤</button></div></figure>`).join('')
       : '<p class="dEmpty">No screenshots yet. Move to a moment and press 📸 (or S).</p>';
     D.shots.forEach(async x => { const fig = box.querySelector(`figure[data-id="${x.id}"]`); if (!fig) return;
       const ta = fig.querySelector('textarea'); wireMic(fig.querySelector('.mic'), ta);
