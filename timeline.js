@@ -1,7 +1,7 @@
 /* Premiere-style timeline: ruler, beats, words, V tracks (text / animation / scene), V1 video,
    camera keyframes and A1 audio. Drag a clip to move it, drag its edges to trim. */
-import { camAt, offOf } from './engine.js?v=17.6';
-import { wireMic } from './tools.js?v=17.6';
+import { camAt, offOf } from './engine.js?v=17.7';
+import { wireMic } from './tools.js?v=17.7';
 const FPS = 30;
 export const fmtTC = t => { t = Math.max(0, t); const f = Math.round(t * FPS), s = Math.floor(f / FPS), fr = f % FPS; return '00:00:' + String(s).padStart(2, '0') + ':' + String(fr).padStart(2, '0'); };
 const fmtS = t => t.toFixed(2) + ' s';
@@ -19,7 +19,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     <button type="button" class="tlBtn tlGuide" title="Safe margins and center (G)" aria-pressed="false"><svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><rect x=".75" y=".75" width="14.5" height="10.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="3.5" y="3" width="9" height="6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M8 4.6v2.8M6.6 6h2.8" stroke="currentColor" stroke-width="1"/></svg></button>
     <span class="tlTC">00:00:00:00</span><span class="tlDur">/ ${fmtTC(DUR)}</span>
     <span class="tlSep"></span>
-    <button type="button" class="tlBtn tlSnap on" title="Snapping (S)">🧲 Snap</button>
+    <button type="button" class="tlBtn tlSnap on" title="Snapping (N)">🧲 Snap</button>
     <button type="button" class="tlBtn tlUndo" title="Undo your last change (Ctrl+Z)">↶ Undo</button>
     <button type="button" class="tlBtn tlReset" disabled title="Put the selected clip back where Claude had it">Reset clip</button>
     <button type="button" class="tlBtn tlResetAll" title="Undo every timing change">Reset all</button>
@@ -29,6 +29,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     <button type="button" class="tlBtn tlDel" disabled title="Delete the selected layer (Delete / Backspace)">🗑</button>
     <button type="button" class="tlBtn tlMute" disabled title="Mute: turn the selected layer off / on, like Premiere's Enable (Shift+E)">⊘ Mute</button>
     <span class="tlSep"></span>
+    <button type="button" class="tlBtn tlCutB" title="Cut V1 at the playhead (S). Click a piece, then Delete to remove it (ripple, like Premiere); Delete again puts it back">✂ Cut</button>
     <button type="button" class="tlBtn tlMark" title="Add a marker at the playhead, then write what Claude should do there (M)">📍 Mark</button>
     <span class="tlSel"></span><span class="tlGrow"></span>
     <label class="tlZoom">− <input type="range" min="0" max="100" value="0" aria-label="Timeline zoom"> +</label>
@@ -117,7 +118,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     TR.filter(t => t.lane).forEach(t => { lane(t.id).innerHTML = t.lane.clips.map(clipHTML).join(''); });
     drawMine();
     const cuts = [...new Set([...BEATS.filter(b => b.cut).map(b => b.t0), ...cutsL.slice(1).map(c => c[0])])];
-    lane('video').innerHTML = `<div class="clip cV" style="left:0;width:${DUR * pps}px"><canvas class="thumbs" width="${Math.round(DUR * pps)}" height="40"></canvas><span>${esc(project.media?.video?.split('/').pop() || 'Video')}</span>${cuts.map(t => `<i class="cut" style="left:${t * pps}px"></i>`).join('')}</div>`;
+    lane('video').innerHTML = `<div class="clip cV" style="left:0;width:${DUR * pps}px"><canvas class="thumbs" width="${Math.round(DUR * pps)}" height="40"></canvas><span>${esc(project.media?.video?.split('/').pop() || 'Video')}</span>${cuts.map(t => `<i class="cut" style="left:${t * pps}px"></i>`).join('')}${vcHTML()}</div>`;
     paintThumbs();
     drawCam(); drawMarks();
     lane('audio').innerHTML = `<div class="clip cA" style="left:0;width:${DUR * pps}px"><canvas class="wave" width="${Math.round(DUR * pps)}" height="36"></canvas></div>`;
@@ -191,6 +192,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function paintSel() { Object.values(pv.byK).forEach(d => d.classList.remove('pa-sel')); sels.forEach(x => x.d && x.d.classList.add('pa-sel'));
     inner.querySelectorAll('.clip.sel').forEach(x => x.classList.remove('sel')); sels.forEach(x => inner.querySelector(`.clip[data-k="${CSS.escape(x.k)}"]`)?.classList.add('sel')); showSel(); }
   function select(c, add) {
+    if (c && vSel) { vSel = null; }
     if (add && c) { if (sels.has(c)) { sels.delete(c); if (sel === c) sel = [...sels].pop() || null; } else { sels.add(c); sel = c; } }
     else { sels = new Set(c ? [c] : []); sel = c || null; }
     if (sel) msel = null; if (c && kSel !== null) { kSel = null; drawCam(); showKf(); } paintSel(); onSelect && onSelect([...sels].map(x => x.k), sel ? sel.k : null); }
@@ -207,6 +209,8 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function onKey(ev) { const tg = ev.target; if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName))) return;
     if (document.querySelector('.ideasWin')) return;   // a window (Brand, Suggestions, progress) is open
     if (ev.altKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) { if (sel) { ev.preventDefault(); moveLayer(ev.key === 'ArrowUp' ? 1 : -1); } return; }
+    if (vSel && !sel && (ev.key === 'Delete' || ev.key === 'Backspace' || (ev.shiftKey && ev.key.toLowerCase() === 'e')) && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); toggleOff(vSel); return; }
+    if (ev.key === 'Escape' && vSel) { vSel = null; draw(); showSel(); return; }
     if (ev.shiftKey && ev.key.toLowerCase() === 'e' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); muteSel(); return; }
     if (ev.key.toLowerCase() === 'm' && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { ev.preventDefault(); addMark(); return; }
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && !ev.ctrlKey && !ev.metaKey) { if (sel || msel) { ev.preventDefault(); deleteSel(); } else if (kSel !== null) { ev.preventDefault(); delKey(); } return; }
@@ -217,11 +221,41 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); seek(Math.round(now() * FPS + (ev.shiftKey ? FPS : 1)) / FPS); }
     else if (ev.key === 'Home') seek(0); else if (ev.key === 'End') seek(DUR);
     else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { if (!onUndo) { ev.preventDefault(); doUndo(); } }
-    else if (ev.key.toLowerCase() === 's' && !ev.ctrlKey && !ev.metaKey) setSnap(!snap);
+    else if (ev.key.toLowerCase() === 's' && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey) { ev.preventDefault(); cutAt(now()); }
+    else if (ev.key.toLowerCase() === 'n' && !ev.ctrlKey && !ev.metaKey) setSnap(!snap);
     else if (ev.key === '=' || ev.key === '+') { zoomIn.value = Math.min(100, +zoomIn.value + 10); setZoom(+zoomIn.value); }
     else if (ev.key === '-') { zoomIn.value = Math.max(0, +zoomIn.value - 10); setZoom(+zoomIn.value); } }
   document.addEventListener('keydown', onKey);
 
+  /* ---------- ✂ your cuts on V1 (S): review.vcut = { splits: [s], off: [[a, b]] } in plan seconds ----------
+     splits = where you cut; off = pieces you removed (skipped in the preview; Claude ripple-deletes them in Premiere) */
+  let vSel = null;
+  const vc = () => (project.review && project.review.vcut) || { splits: [], off: [] };
+  const vcW = () => { const R = project.review ||= {}; const o = R.vcut ||= {}; o.splits ||= []; o.off ||= []; return o; };
+  const vcClean = () => { const R = project.review; if (!R || !R.vcut) return; if (!(R.vcut.splits || []).length && !(R.vcut.off || []).length) delete R.vcut; };
+  const vBounds = () => [...new Set([0, DUR, ...(vc().splits || []), ...cutsL.slice(1).map(c => c[0])].map(r3))].sort((a, b) => a - b);
+  const pieceAt = t => { const B = vBounds(); for (let i = 0; i < B.length - 1; i++) if (t >= B[i] - 1e-4 && t < B[i + 1] - 1e-4) return [B[i], B[i + 1]]; return [B[B.length - 2], B[B.length - 1]]; };
+  const isOff = p => (vc().off || []).some(r => Math.abs(r[0] - p[0]) < 2e-3 && Math.abs(r[1] - p[1]) < 2e-3);
+  function vcHTML() { const o = vc();
+    return (o.splits || []).map(t => `<i class="cut uc" style="left:${t * pps}px" title="Your cut ${fmtS(t)}"></i>`).join('') +
+      (o.off || []).map(r => `<b class="vOff" style="left:${r[0] * pps}px;width:${(r[1] - r[0]) * pps}px" title="Removed ${fmtS(r[0])} → ${fmtS(r[1])} · Delete to put it back"></b>`).join('') +
+      (vSel ? `<b class="vSelBox" style="left:${vSel[0] * pps}px;width:${(vSel[1] - vSel[0]) * pps}px"></b>` : ''); }
+  function showV() { if (!vSel) return; selEl.innerHTML = `<b>V1 piece</b> · ${fmtS(vSel[0])} → ${fmtS(vSel[1])} (${(vSel[1] - vSel[0]).toFixed(2)} s)${isOff(vSel) ? ' <em>removed</em> · Delete puts it back' : ' · Delete removes it (ripple)'}`; }
+  function cutAt(t) { if (readOnly) return; t = Math.round(t * FPS) / FPS;
+    if (t <= 1 / FPS || t >= DUR - 1 / FPS) { status && status('Move the playhead inside the clip to cut'); return; }
+    if (vBounds().some(b => Math.abs(b - t) < 0.5 / FPS)) { status && status('There is already a cut here'); return; }
+    const o = vcW(); o.splits.push(r3(t)); o.splits.sort((a, b) => a - b);
+    o.off = o.off.flatMap(r => t > r[0] + 1e-3 && t < r[1] - 1e-3 ? [[r[0], r3(t)], [r3(t), r[1]]] : [r]);   // a cut inside a removed piece keeps both halves removed
+    onChange && onChange(); draw(); status && status(`✂ Cut at ${fmtTC(t)} · click a piece and press Delete to remove it · Ctrl+Z to undo`); }
+  function toggleOff(p) { if (readOnly || !p) return; const o = vcW(), i = o.off.findIndex(r => Math.abs(r[0] - p[0]) < 2e-3 && Math.abs(r[1] - p[1]) < 2e-3);
+    if (i >= 0) o.off.splice(i, 1); else { if ((p[1] - p[0]) >= DUR - 1e-3) { status && status('Cut first (S): you cannot remove the whole clip'); return; } o.off.push([r3(p[0]), r3(p[1])]); o.off.sort((a, b) => a[0] - b[0]); }
+    vcClean(); onChange && onChange(); pv.refresh(); draw(); showV(); status && status(i >= 0 ? 'Piece put back' : `Removed ${fmtS(p[0])} → ${fmtS(p[1])} · it is skipped in the preview and Claude ripple-deletes it in Premiere · Ctrl+Z to undo`); }
+  box.querySelector('.tlCutB').onclick = () => cutAt(now());
+  lane('video').addEventListener('pointerdown', ev => { if (ev.button !== 0) return; const t = Math.max(0, Math.min(DUR - 1e-3, (ev.clientX - inner.getBoundingClientRect().left) / pps));
+    select(null); vSel = pieceAt(t); seek(t); draw(); showV(); });
+  const vcutText = () => { const o = vc(), sp = (o.splits || []), off = (o.off || []); if (!sp.length && !off.length) return '';
+    return ' · my cuts on V1 (S): ' + (off.length ? 'REMOVE (ripple delete in Premiere, close the gap, move every later graphic/zoom/word earlier) ' + off.map(r => `${r[0].toFixed(2)}–${r[1].toFixed(2)} s`).join(', ') : '') +
+      (sp.length ? (off.length ? '; ' : '') + 'cut points ' + sp.map(t => t.toFixed(2) + ' s').join(', ') + ' (razor here; a cut that only splits = change the angle there: Cam B or the Zoom layer)' : ''); };
   const changesText = bid => { const ch = clips.filter(c => c.beat === bid && !c.user && changed(c)); if (!ch.length) return '';
     return ' · timeline (apply exactly): ' + ch.map(c => `el#${c.i} “${c.label}” in ${c.o.in.toFixed(2)}→${c.st.in.toFixed(2)} s, out ${c.o.out.toFixed(2)}→${c.st.out.toFixed(2)} s${Math.abs(c.st.off) > .004 ? ' (whole clip moved)' : ''}`).join('; '); };
   /* your photos / videos (suggestions for Claude): one lane, drag to move, drag the edges to trim */
@@ -388,7 +422,7 @@ export function createTimeline(box, project, pv, { onChange, onSelect, onUndo, o
   function sync() { if (mkOpen && !marks().some(x => x.id === mkOpen)) closeMark(); clips.forEach(c => { const s = project.timeline[c.k]; c.st = s ? { in: +s.in, out: +s.out, off: +(s.off || 0) } : { in: c.o.in, out: c.o.out, off: 0 }; apply(c); }); pv.refresh(); draw(); showSel(); showKf(); }
   const ro = new ResizeObserver(() => setZoom(+zoomIn.value)); ro.observe(scroll);
   setZoom(0); pv.refresh();
-  return { seek, togglePlay, changesText, sync, redraw: () => draw(), now, isLocked, deleteSel, addMark,
+  return { seek, togglePlay, changesText, vcutText, sync, redraw: () => draw(), now, isLocked, deleteSel, addMark,
     markSel: keys => { sels = new Set(clips.filter(c => keys.includes(c.k))); sel = sels.size ? [...sels].pop() : null; if (sel) msel = null; paintSel(); },
     selectKey: k => { const c = clips.find(x => x.k === k); if (c) { select(c); const el = inner.querySelector(`.clip[data-k="${CSS.escape(k)}"]`); if (el) { const x = el.offsetLeft; if (x < scroll.scrollLeft || x > scroll.scrollLeft + scroll.clientWidth - 40) scroll.scrollLeft = x - 60; el.scrollIntoView({ block: 'nearest' }); } } },
     selectMedia: id => { msel = id; if (id) { sels = new Set(); sel = null; paintSel(); } drawMine(); showSel(); }, destroy() { alive = false; closeMark(); document.removeEventListener('pointerdown', onDocDown2); document.removeEventListener('keydown', onKey); ro.disconnect(); gEl.remove(); document.removeEventListener('pointerdown', onDocDown); } };
