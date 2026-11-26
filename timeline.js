@@ -1,7 +1,7 @@
 /* Premiere-style timeline: ruler, beats, words, V tracks (text / animation / scene), V1 video,
    camera keyframes and A1 audio. Drag a clip to move it, drag its edges to trim. */
-import { camAt, offOf } from './engine.js?v=17.8';
-import { wireMic } from './tools.js?v=17.8';
+import { camAt, offOf } from './engine.js?v=17.9';
+import { wireMic } from './tools.js?v=17.9';
 const FPS = 30;
 export const fmtTC = t => { t = Math.max(0, t); const f = Math.round(t * FPS), s = Math.floor(f / FPS), fr = f % FPS; return '00:00:' + String(s).padStart(2, '0') + ':' + String(fr).padStart(2, '0'); };
 const fmtS = t => t.toFixed(2) + ' s';

@@ -3,9 +3,9 @@
    It only listens on 127.0.0.1, only answers the Planner app, and only runs "/planner …" requests
    for .planner files inside the projects folder you picked. No dependencies. */
 'use strict';
-const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn } = require('child_process');
+const http = require('http'), fs = require('fs'), fsp = fs.promises, path = require('path'), os = require('os'), { spawn, spawnSync } = require('child_process');
 
-const VERSION = '1.2.3';
+const VERSION = '1.3.0';
 const DIR = __dirname;
 const CFG_FILE = path.join(DIR, 'config.json');
 let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) {}
@@ -86,7 +86,18 @@ function parse(command) {   // "/planner revise P2" → { kind: 'revise', seq: '
   if (kind === 'apply' && /^all$/i.test(w[1] || '')) return { kind: 'apply all changes', seq: 'all' };
   return { kind, seq: w[1] || '', beat: w[2] || '' };
 }
-const pub = j => j && { id: j.id, seq: j.seq, kind: j.kind, beat: j.beat, command: j.command, file: path.basename(j.file || ''), state: j.state, step: j.step, pct: j.pct, steps: j.steps.slice(-8),
+/* model / effort for one job (the app's pickers beside Revise); anything unexpected is ignored */
+const MODEL_RE = /^[A-Za-z0-9._:\[\]-]{1,80}$/, EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const pickModel = m => typeof m === 'string' && MODEL_RE.test(m) ? m : '';
+const pickEffort = e => EFFORTS.includes(e) ? e : '';
+let effortCheck = { at: 0, ok: false };
+function effortOk(claude) {   // older Claude Code has no --effort: ask its --help once in a while instead of failing the job
+  if (Date.now() - effortCheck.at < 10 * 60 * 1000) return effortCheck.ok;
+  let ok = false;
+  try { const r = spawnSync(claude, ['--help'], { encoding: 'utf8', timeout: 30000, windowsHide: true, shell: /\.(cmd|bat)$/i.test(claude) }); ok = /--effort\b/.test(String(r.stdout || '') + String(r.stderr || '')); } catch (e) {}
+  effortCheck = { at: Date.now(), ok }; log('claude --effort', ok ? 'supported' : 'not supported (update Claude Code to use it)'); return ok;
+}
+const pub = j => j && { id: j.id, seq: j.seq, kind: j.kind, beat: j.beat, command: j.command, model: j.model || '', effort: j.effort || '', file: path.basename(j.file || ''), state: j.state, step: j.step, pct: j.pct, steps: j.steps.slice(-8),
   queuedAt: j.queuedAt, started: j.started, ended: j.ended, result: j.result };
 function snapshot() { return { job: pub(job && job.state === 'running' ? job : job), running: !!child, queue: queue.map(pub), history: history.slice(0, 15).map(pub), helper: VERSION }; }
 async function readStatusPct(j) {   // the % Claude writes into planner-status.json (if any)
@@ -96,16 +107,18 @@ async function readStatusPct(j) {   // the % Claude writes into planner-status.j
   }
   return 0;
 }
-async function enqueue({ file, project, command, request }) {
+async function enqueue({ file, project, command, request, model, effort }) {
   if (!/^\/planner(\s+[\w .,#&()'-]{1,80})?$/.test(command || '')) throw Object.assign(new Error('Only /planner requests can be run.'), { code: 400 });
   if (!/\.planner$/i.test(file || '') || /[\\/]/.test(file)) throw Object.assign(new Error('Bad project file name.'), { code: 400 });
   if (!findClaude()) throw Object.assign(new Error('Claude Code is not installed on this computer. Run the Planner Helper setup again.'), { code: 412 });
   const pf = await findPlanner(file, project);
   if (!pf) throw Object.assign(new Error(`Could not find "${file}" inside ${ROOT}. Is it in your projects folder?`), { code: 404 });
+  const rq = request && typeof request === 'object' ? request : null;
+  const jm = pickModel(model || (rq && rq.model)), je = pickEffort(effort || (rq && rq.effort));
   const same = queue.find(q => q.file === pf && q.command === command);
-  if (same) return { id: same.id, file: pf, position: queue.indexOf(same) + 1 + (child ? 1 : 0), queued: true };
+  if (same) { if (jm) same.model = jm; if (je) same.effort = je; if (rq) same.request = rq; return { id: same.id, file: pf, position: queue.indexOf(same) + 1 + (child ? 1 : 0), queued: true }; }
   const p = parse(command);
-  const j = { id: ++seq, file: pf, command, request: request && typeof request === 'object' ? request : null, ...p, state: 'queued', step: 'Waiting in line', pct: 0, steps: [], lines: [], queuedAt: new Date().toISOString(), result: null };
+  const j = { id: ++seq, file: pf, command, request: rq, model: jm, effort: je, ...p, state: 'queued', step: 'Waiting in line', pct: 0, steps: [], lines: [], queuedAt: new Date().toISOString(), result: null };
   queue.push(j); log('queued', j.id, command, '(' + queue.length + ' waiting)');
   setImmediate(next);
   return { id: j.id, file: pf, position: queue.indexOf(j) + 1 + (child ? 1 : 0), queued: !!child };
@@ -119,10 +132,12 @@ function next() {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Read,Write,Edit,MultiEdit,Glob,Grep,Bash,' + (process.platform === 'win32' ? 'PowerShell,' : '') + 'WebFetch,WebSearch,TodoWrite,Skill,Task'];
   let model = cfg.model; try { model = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '')).model; } catch (e) {}   // read fresh, so a fixed config works without a restart
-  if (model && /^[A-Za-z0-9._:\[\]-]{1,80}$/.test(model)) args.push('--model', model);
+  if (j.model) model = j.model;   // picked beside Revise in the app
+  if (model && MODEL_RE.test(model)) args.push('--model', model);
+  if (j.effort && effortOk(claude)) args.push('--effort', j.effort);
   const logFile = path.join(LOGS, `job-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
   Object.assign(j, { state: 'running', step: 'Starting Claude Code…', pct: 3, started: new Date().toISOString() });
-  log('job', j.id, j.command, j.file);
+  log('job', j.id, j.command, j.file, (j.model || model || 'default model') + (j.effort ? ' · effort ' + j.effort : ''));
   const isCmd = /\.(cmd|bat)$/i.test(claude);
   try { child = spawn(claude, args, { cwd, windowsHide: true, shell: isCmd, env: { ...process.env, PLANNER_FILE: j.file } }); }
   catch (e) { j.state = 'error'; j.step = 'Could not start Claude Code: ' + e.message; finish(j); return; }

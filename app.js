@@ -1,11 +1,11 @@
-import { createPreview } from './engine.js?v=17.8';
-import { createTimeline, fmtTC } from './timeline.js?v=17.8';
-import { attachTools, wireMic } from './tools.js?v=17.8';
-import { openBrand, brandText, brandCount } from './brand.js?v=17.8';
-import { wireRefs, refsText } from './refs.js?v=17.8';
+import { createPreview } from './engine.js?v=17.9';
+import { createTimeline, fmtTC } from './timeline.js?v=17.9';
+import { attachTools, wireMic } from './tools.js?v=17.9';
+import { openBrand, brandText, brandCount } from './brand.js?v=17.9';
+import { wireRefs, refsText } from './refs.js?v=17.9';
 import { openDirect, directOf, directText, lookText, directCount } from './direct.js?v=17.2';
 import { openIdeas, ideaText, ideaBeats } from './ideas.js?v=17.2';
-import { openProgress, sound, kindName } from './progress.js?v=17.0';
+import { openProgress, sound, kindName } from './progress.js?v=17.9';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -331,17 +331,32 @@ async function helperPing() {
 }
 function paintHelper() {
   const b = $('#ccBadge'); if (!b) return; const on = !!(helper && helper.claude);
-  b.hidden = !P; b.className = 'ccBadge' + (on ? ' on' : '');
-  b.textContent = on ? (helper.busy ? '● Claude Code · working' : '● Claude Code') : '○ Claude chat';
-  b.title = on ? `Claude Code on this computer does your requests (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`
+  b.hidden = !P; b.className = 'ccBadge' + (on ? ' on' : '') + (helperOld() ? ' old' : '');
+  b.textContent = on ? (helper.busy ? '● Claude Code · working' : helperOld() ? '● Claude Code · update' : '● Claude Code') : '○ Claude chat';
+  b.title = helperOld() ? `Planner Helper ${helper.helper} is old: it can't use the model and effort you pick beside Revise. Click to copy the update command.`
+    : on ? `Claude Code on this computer does your requests (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`
     : helper ? 'The Planner Helper is running but Claude Code is not installed. Click to copy the setup command again.'
     : 'Requests are copied for the Claude chat. Click to copy the setup command that lets Claude Code on this computer do them.';
 }
+/* Revise: which Claude does it. Claude Code on this computer runs with this model and effort (Planner Helper 1.3+); remembered on this computer */
+const CC_MODELS = { 'claude-opus-5-5': 'Opus 5.5', 'claude-fable-5-2': 'Fable 5.2' };
+const CC_EFFORTS = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra', max: 'Max' };
+const CC_MIN = '1.3.0';
+const ccGet = (k, list, def) => { let v = null; try { v = localStorage.getItem(k); } catch (e) {} return v && list[v] ? v : def; };
+const ccSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+$('#ccModel').value = ccGet('planner.ccModel', CC_MODELS, 'claude-opus-5-5');
+$('#ccEffort').value = ccGet('planner.ccEffort', CC_EFFORTS, 'xhigh');
+$('#ccModel').onchange = () => ccSet('planner.ccModel', $('#ccModel').value);
+$('#ccEffort').onchange = () => ccSet('planner.ccEffort', $('#ccEffort').value);
+const ccChoice = () => ({ model: $('#ccModel').value, effort: $('#ccEffort').value });
+const ccLabel = c => `${CC_MODELS[c.model] || c.model} · ${CC_EFFORTS[c.effort] || c.effort}`;
+const verAtLeast = (v, min) => { const a = String(v || '0').split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
+const helperOld = () => !!(helper && helper.claude && !verAtLeast(helper.helper, CC_MIN));
 /* send a saved request: straight to Claude Code when the helper runs, otherwise copy it for the Claude chat */
-async function dispatch(line, names) {
+async function dispatch(line, names, cc) {
   if ((helper && helper.claude) || (await helperPing())?.claude) {
     try {
-      const r = await hfetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: fh.name, project: P.id, command: line, request: lastRequest }) });
+      const r = await hfetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: fh.name, project: P.id, command: line, request: lastRequest, ...(cc || {}) }) });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
       names.forEach(n => { const k = n.toLowerCase(); jobs[k] = { ...(jobs[k] || { seq: n }), seq: n, pct: 0, state: 'waiting', step: j.position > 1 ? `In line #${j.position}` : 'Starting…', hid: j.id, since: new Date().toISOString() }; });
       watchQueue(); return 'code';
@@ -349,9 +364,11 @@ async function dispatch(line, names) {
   }
   try { await navigator.clipboard.writeText(line); return 'copied'; } catch (e) { return 'type'; }
 }
-function sentText(mode, line, extra = '') {
-  if (mode === 'code') return `Claude Code is on it ✓ ${extra} Watch the progress bar at the top; the tab updates by itself.`;
-  return (mode === 'copied' ? 'Now paste in the Claude chat (' + (IS_MAC ? 'Cmd+V' : 'Ctrl+V') + ') and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra;
+function sentText(mode, line, extra = '', cc = null) {
+  if (mode === 'code') return `Claude Code${cc ? ' (' + esc(ccLabel(cc)) + ')' : ''} is on it ✓ ${extra} Watch the progress bar at the top; the tab updates by itself.`
+    + (cc && helperOld() ? `<br>⚠ Your Planner Helper (${esc(helper.helper)}) is old, so it used its own model and effort. Click the yellow <b>● Claude Code · update</b> badge at the top to update it.` : '');
+  return (mode === 'copied' ? 'Now paste in the Claude chat (' + (IS_MAC ? 'Cmd+V' : 'Ctrl+V') + ') and send.' : 'Now type in the Claude chat: <b>' + esc(line) + '</b>') + ' ' + extra
+    + (cc ? ` In the chat, pick <b>${esc(CC_MODELS[cc.model] || cc.model)}</b> and effort <b>${esc(CC_EFFORTS[cc.effort] || cc.effort)}</b> first.` : '');
 }
 /* ---------- the helper's queue: one request after another, a sound when each is done ---------- */
 let hq = null, hqT = null, doneSeen = null, hadWork = false, progWin = null;
@@ -651,13 +668,14 @@ function summary(kind) {
 async function send(kind) {
   if (!P) return; endTry();
   if (kind === 'revise') { remember([S]); paintPrev(); }
-  const ok = await save({ kind, sequence: S.id, at: new Date().toISOString(), summary: summary(kind) });
+  const cc = kind === 'revise' ? ccChoice() : null;
+  const ok = await save({ kind, sequence: S.id, at: new Date().toISOString(), summary: summary(kind), ...(cc || {}) });
   if (!ok) return;
   const line = `/planner ${kind === 'apply' ? 'apply' : 'revise'} ${seqName()}`;
   jobs[seqName().toLowerCase()] = { seq: seqName(), pct: 0, step: 'Waiting for Claude', state: 'waiting', since: new Date().toISOString() };
-  const mode = await dispatch(line, [seqName()]);
+  const mode = await dispatch(line, [seqName()], cc);
   if (mode !== 'code') jobs[seqName().toLowerCase()].step = 'Paste the line in the Claude chat';
-  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ` + sentText(mode, line, `The ${esc(seqName())} tab plays the result when it’s ready.`);
+  $('#sendMsg').innerHTML = `Saved in <b>${esc(fh.name)}</b> ✓ ` + sentText(mode, line, `The ${esc(seqName())} tab plays the result when it’s ready.`, cc);
   paintTabs(); pollSoon();
 }
 $('#reviseBtn').onclick = () => send('revise');
@@ -812,9 +830,9 @@ function seqText(s) {
 }
 $('#ccBadge').onclick = async () => {
   await helperPing();
-  if (helper && helper.claude) { status(`Claude Code is connected (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`); return; }
+  if (helper && helper.claude && !helperOld()) { status(`Claude Code is connected (Planner Helper ${helper.helper}). Projects folder: ${helper.root}`); return; }
   let copied = false; try { await navigator.clipboard.writeText(SETUP_CMD); copied = true; } catch (e) {}
-  await ask((copied ? 'Setup command copied. ' : '') + 'To let Claude Code on this computer do your requests: ' + (IS_MAC ? 'open Terminal (Cmd+Space → type Terminal), paste the command (Cmd+V)' : 'open PowerShell (Start → type PowerShell), paste the command (right-click)') + ' and press Enter. Then reload this page.\n\n' + SETUP_CMD, 'OK', 'Close');
+  await ask((copied ? (helperOld() ? 'Update command copied. ' : 'Setup command copied. ') : '') + (helperOld() ? 'To update the Planner Helper (so Revise uses the model and effort you pick): ' : 'To let Claude Code on this computer do your requests: ') + (IS_MAC ? 'open Terminal (Cmd+Space → type Terminal), paste the command (Cmd+V)' : 'open PowerShell (Start → type PowerShell), paste the command (right-click)') + ' and press Enter. Then reload this page.\n\n' + SETUP_CMD, 'OK', 'Close');
 };
 $('#applyAllBtn').onclick = async () => {
   if (!P) return; checkpoint(true);

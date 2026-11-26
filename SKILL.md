@@ -15,7 +15,7 @@ The Planner app (https://rcz18.github.io/planner-app) saves a request into a `.p
 - Do not ask questions; there is nobody to answer. Take the most reasonable reading and say which one at the end.
 
 ## 1. Read
-1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, handled? }`. If there is no request or `handled: true`, say there is nothing new and stop.
+1. Read the `.planner` file (JSON). `request` = `{ kind: "new" | "revise" | "revise-all" | "suggest" | "apply", sequence, sequences?, beat?, at, summary, model?, effort?, handled? }`. `model` / `effort` (app v17.9+) are what the user picked beside Revise (`claude-opus-5-5` or `claude-fable-5-2`; `low` … `xhigh` = Extra … `max`); the Planner Helper 1.3+ already starts Claude Code with them. In the Claude chat, if you are not that model, say so in one line and carry on. If there is no request or `handled: true`, say there is nothing new and stop.
    - **Save tokens:** the file can hold big pictures (`data:image/...` strings). Never Read the whole file raw. Print it with the pictures cut out, and write the pictures you need to files:
      `node -e "const f=process.argv[1],fs=require('fs'),p=require('path');let n=0;const o=JSON.stringify(JSON.parse(fs.readFileSync(f,'utf8')),(k,v)=>typeof v==='string'&&v.startsWith('data:image')?(fs.writeFileSync(p.join(require('os').tmpdir(),'planner-img-'+(++n)+'.jpg'),Buffer.from(v.split(',')[1],'base64')),'<picture planner-img-'+n+'.jpg in temp>'):v,1);console.log(o)" "<file>"`
      Then Read only the pictures that matter for this request.
